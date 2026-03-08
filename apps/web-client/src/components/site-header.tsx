@@ -1,11 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useCatalogStore } from "@/store/useCatalogStore";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { Radio } from "lucide-react";
+import { Radio, Crosshair } from "lucide-react";
 
 const navItems = [
   { href: "/scenarios", label: "Scenarios" },
@@ -16,7 +17,13 @@ const navItems = [
 export function SiteHeader() {
   useWebSocket();
   const wsConnected = useCatalogStore((s) => s.wsConnected);
+  const targetUrl = useCatalogStore((s) => s.targetUrl);
+  const fetchHealth = useCatalogStore((s) => s.fetchHealth);
   const pathname = usePathname();
+
+  useEffect(() => {
+    fetchHealth();
+  }, [fetchHealth]);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/80 backdrop-blur-xl">
@@ -61,18 +68,26 @@ export function SiteHeader() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Connection status */}
-        <div className="flex items-center gap-2 type-timestamp">
-          <Radio className={cn(
-            "h-3.5 w-3.5 transition-colors",
-            wsConnected ? "text-success" : "text-muted-foreground"
-          )} />
-          <span className={cn(
-            "transition-colors",
-            wsConnected ? "text-success" : "text-muted-foreground"
-          )}>
-            {wsConnected ? "CONNECTED" : "OFFLINE"}
-          </span>
+        {/* Target & connection status */}
+        <div className="flex items-center gap-4 type-timestamp">
+          {targetUrl && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Crosshair className="h-3.5 w-3.5" />
+              <span>{targetUrl}</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <Radio className={cn(
+              "h-3.5 w-3.5 transition-colors",
+              wsConnected ? "text-success" : "text-muted-foreground"
+            )} />
+            <span className={cn(
+              "transition-colors",
+              wsConnected ? "text-success" : "text-muted-foreground"
+            )}>
+              {wsConnected ? "CONNECTED" : "OFFLINE"}
+            </span>
+          </div>
         </div>
       </div>
     </header>

@@ -26,6 +26,7 @@ interface QueuedWaiter {
 
 // ── Constants ────────────────────────────────────────────────────────
 
+const DEFAULT_TARGET_URL = 'http://localhost:8880';
 const DEFAULT_MAX_CONCURRENCY = 3;
 const CLEANUP_INTERVAL_MS = 60_000;
 const CLEANUP_TTL_MS = 30 * 60_000; // 30 minutes
@@ -37,6 +38,9 @@ export class ScenarioEngine extends EventEmitter {
   private catalog: CatalogService;
   private executions: Map<string, ScenarioExecution>;
   private controls: Map<string, ExecutionControl> = new Map();
+
+  // Target URL for scenario execution
+  readonly targetUrl: string;
 
   // Concurrency semaphore
   private maxConcurrency: number;
@@ -50,6 +54,7 @@ export class ScenarioEngine extends EventEmitter {
     super();
     this.catalog = catalog;
     this.executions = new Map();
+    this.targetUrl = (process.env.CRUCIBLE_TARGET_URL ?? DEFAULT_TARGET_URL).replace(/\/+$/, '');
     this.maxConcurrency = parseInt(
       process.env.CRUCIBLE_MAX_CONCURRENCY ?? '',
       10,
@@ -375,19 +380,21 @@ export class ScenarioEngine extends EventEmitter {
     }
 
     // ── Resolve templates ───────────────────────────────────────────
-    const url = resolveTemplates(step.request.url, context);
+    const resolvedUrl = resolveTemplates(step.request.url, context, this.targetUrl);
+    // Prepend target URL to relative paths
+    const url = resolvedUrl.startsWith('/') ? `${this.targetUrl}${resolvedUrl}` : resolvedUrl;
     const headers: Record<string, string> = {};
     if (step.request.headers) {
       for (const [k, v] of Object.entries(step.request.headers)) {
-        headers[k] = resolveTemplates(v, context);
+        headers[k] = resolveTemplates(v, context, this.targetUrl);
       }
     }
 
     let rawBody: string | undefined;
     if (step.request.body !== undefined) {
       rawBody = typeof step.request.body === 'string'
-        ? resolveTemplates(step.request.body, context)
-        : resolveTemplates(JSON.stringify(step.request.body), context);
+        ? resolveTemplates(step.request.body, context, this.targetUrl)
+        : resolveTemplates(JSON.stringify(step.request.body), context, this.targetUrl);
     }
 
     // ── Iterations ──────────────────────────────────────────────────
@@ -656,9 +663,10 @@ export class ScenarioEngine extends EventEmitter {
 const TEMPLATE_RE = /\{\{(\w+)\}\}/g;
 
 /** Replace {{varName}} tokens in a string using context values. */
-function resolveTemplates(input: string, context: Map<string, unknown>): string {
+function resolveTemplates(input: string, context: Map<string, unknown>, targetUrl: string): string {
   return input.replace(TEMPLATE_RE, (match, varName: string) => {
     // Built-in variables
+    if (varName === 'target') return targetUrl;
     if (varName === 'random') return Math.random().toString(36).slice(2, 10);
     if (varName === 'random_ip') {
       return [1, 2, 3, 4].map(() => Math.floor(Math.random() * 255) + 1).join('.');

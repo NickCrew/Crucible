@@ -26,7 +26,7 @@ setupWebSocket(wss, engine);
 
 // Health check
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: Date.now(), scenarios: catalog.size });
+  res.json({ status: 'ok', timestamp: Date.now(), scenarios: catalog.size, targetUrl: engine.targetUrl });
 });
 
 // ── Global execution control routes (BEFORE parameterized routes) ────
@@ -149,5 +149,5 @@ app.get('/api/reports/:id', (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Demo Dashboard server running on port ${PORT} (${catalog.size} scenarios loaded)`);
+  console.log(`Demo Dashboard server running on port ${PORT} (${catalog.size} scenarios loaded, target: ${engine.targetUrl})`);
 });

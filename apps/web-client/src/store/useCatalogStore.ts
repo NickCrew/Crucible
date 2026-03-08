@@ -72,8 +72,10 @@ interface CatalogState {
   isLoading: boolean;
   error: string | null;
   wsConnected: boolean;
+  targetUrl: string | null;
 
   fetchScenarios: () => Promise<void>;
+  fetchHealth: () => Promise<void>;
   updateScenario: (id: string, data: Scenario) => Promise<void>;
   startSimulation: (scenarioId: string) => Promise<string>;
   startAssessment: (scenarioId: string) => Promise<string>;
@@ -100,6 +102,19 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
   isLoading: false,
   error: null,
   wsConnected: false,
+  targetUrl: null,
+
+  fetchHealth: async () => {
+    try {
+      const base = API_BASE.replace(/\/api$/, '');
+      const response = await fetch(`${base}/health`);
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.targetUrl) set({ targetUrl: data.targetUrl });
+    } catch {
+      // health check is best-effort
+    }
+  },
 
   fetchScenarios: async () => {
     set({ isLoading: true, error: null });
