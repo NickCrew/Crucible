@@ -42,6 +42,10 @@ export interface ExecutionStepResult {
   assertions?: AssertionResult[];
 }
 
+export interface ExecutionStepDelta extends Partial<Omit<ExecutionStepResult, 'stepId'>> {
+  stepId: string;
+}
+
 export interface ScenarioExecution {
   id: string;
   scenarioId: string;
@@ -62,6 +66,13 @@ export interface ScenarioExecution {
     passed: boolean;
     score: number;
     artifacts: string[];
+  };
+}
+
+export interface ScenarioExecutionDelta {
+  id: string;
+  changes: Partial<Omit<ScenarioExecution, 'id' | 'steps'>> & {
+    steps?: ExecutionStepDelta[];
   };
 }
 
@@ -100,6 +111,7 @@ interface CatalogState {
   startSimulation: (scenarioId: string) => Promise<string>;
   startAssessment: (scenarioId: string) => Promise<string>;
   updateExecution: (execution: ScenarioExecution) => void;
+  applyExecutionDelta: (delta: ScenarioExecutionDelta) => void;
   setActiveExecution: (executionId: string | null) => void;
   setWsConnected: (connected: boolean) => void;
   clearError: () => void;
@@ -298,6 +310,35 @@ export const useCatalogStore = create<CatalogState>((set, get) => {
       scheduleMetricsSample();
     },
 
+    applyExecutionDelta: (delta: ScenarioExecutionDelta) => {
+      let appliedDelta = false;
+
+      set((state) => {
+        const targetExecution = state.executions.find((execution) => execution.id === delta.id);
+        if (!targetExecution) {
+          return {};
+        }
+
+        appliedDelta = true;
+
+        const mergedExecution = mergeExecutionDelta(targetExecution, delta);
+        const executions = state.executions.map((execution) =>
+          execution.id === delta.id ? mergedExecution : execution,
+        );
+        const activeExecution =
+          state.activeExecution?.id === delta.id ? mergedExecution : state.activeExecution;
+
+        return {
+          executions,
+          activeExecution,
+        };
+      });
+
+      if (appliedDelta) {
+        scheduleMetricsSample();
+      }
+    },
+
     setActiveExecution: (executionId: string | null) => {
       if (!executionId) {
         set({ activeExecution: null });
@@ -427,4 +468,41 @@ function deriveMetricsSnapshot(executions: ScenarioExecution[]): ExecutionMetric
     completedSteps,
     failedSteps,
   };
+}
+
+function mergeExecutionDelta(
+  execution: ScenarioExecution,
+  delta: ScenarioExecutionDelta,
+): ScenarioExecution {
+  const { steps: stepChanges, ...topLevelChanges } = delta.changes;
+
+  return {
+    ...execution,
+    ...topLevelChanges,
+    steps: stepChanges ? mergeExecutionSteps(execution.steps, stepChanges) : execution.steps,
+  };
+}
+
+function mergeExecutionSteps(
+  existingSteps: ExecutionStepResult[],
+  stepChanges: ExecutionStepDelta[],
+): ExecutionStepResult[] {
+  const stepsById = new Map(existingSteps.map((step) => [step.stepId, step]));
+
+  for (const stepChange of stepChanges) {
+    const existingStep = stepsById.get(stepChange.stepId);
+    stepsById.set(
+      stepChange.stepId,
+      existingStep ? { ...existingStep, ...stepChange } : (stepChange as ExecutionStepResult),
+    );
+  }
+
+  const mergedSteps = existingSteps.map((step) => stepsById.get(step.stepId) ?? step);
+  for (const stepChange of stepChanges) {
+    if (!existingSteps.some((step) => step.stepId === stepChange.stepId)) {
+      mergedSteps.push(stepChange as ExecutionStepResult);
+    }
+  }
+
+  return mergedSteps;
 }

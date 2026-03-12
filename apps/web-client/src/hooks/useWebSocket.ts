@@ -14,7 +14,7 @@ const RECONNECT_DELAY = 3000;
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const { updateExecution, setWsConnected } = useCatalogStore();
+  const { updateExecution, applyExecutionDelta, setWsConnected } = useCatalogStore();
 
   useEffect(() => {
     function connect() {
@@ -40,7 +40,16 @@ export function useWebSocket() {
             case "EXECUTION_RESUMED":
             case "STATUS_UPDATE":
               if (msg.payload && msg.payload.id) {
-                updateExecution(msg.payload);
+                if (msg.format === "delta") {
+                  applyExecutionDelta(msg.payload);
+                } else {
+                  updateExecution(msg.payload);
+                }
+              }
+              break;
+            case "EXECUTION_DELTA":
+              if (msg.payload && msg.payload.id) {
+                applyExecutionDelta(msg.payload);
               }
               break;
           }
@@ -67,5 +76,5 @@ export function useWebSocket() {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [updateExecution, setWsConnected]);
+  }, [applyExecutionDelta, updateExecution, setWsConnected]);
 }

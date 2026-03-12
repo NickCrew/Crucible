@@ -262,8 +262,135 @@ describe('useCatalogStore', () => {
           runningSteps: 0,
         }),
       );
+    });
+  });
 
-      vi.useRealTimers();
+  describe('applyExecutionDelta', () => {
+    it('merges top-level execution fields and existing step updates in place', () => {
+      useCatalogStore.setState({
+        executions: [
+          {
+            id: 'exec-1',
+            scenarioId: 'scenario-a',
+            mode: 'simulation',
+            status: 'running',
+            steps: [
+              {
+                stepId: 'step-1',
+                status: 'running',
+                attempts: 1,
+                startedAt: 100,
+              },
+            ],
+          } as any,
+        ],
+      });
+
+      useCatalogStore.getState().applyExecutionDelta({
+        id: 'exec-1',
+        changes: {
+          status: 'completed',
+          duration: 1200,
+          steps: [
+            {
+              stepId: 'step-1',
+              status: 'completed',
+              duration: 900,
+              attempts: 1,
+            },
+          ],
+        },
+      });
+
+      const execution = useCatalogStore.getState().executions[0];
+      expect(execution.status).toBe('completed');
+      expect(execution.duration).toBe(1200);
+      expect(execution.steps[0]).toEqual(
+        expect.objectContaining({
+          stepId: 'step-1',
+          status: 'completed',
+          duration: 900,
+          startedAt: 100,
+        }),
+      );
+    });
+
+    it('appends new step deltas and samples telemetry from the merged execution state', () => {
+      useCatalogStore.setState({
+        executions: [
+          {
+            id: 'exec-1',
+            scenarioId: 'scenario-a',
+            mode: 'simulation',
+            status: 'running',
+            steps: [{ stepId: 'step-1', status: 'completed', attempts: 1 }],
+          } as any,
+        ],
+      });
+
+      useCatalogStore.getState().applyExecutionDelta({
+        id: 'exec-1',
+        changes: {
+          steps: [{ stepId: 'step-2', status: 'failed', attempts: 1, error: 'boom' }],
+        },
+      });
+
+      const execution = useCatalogStore.getState().executions[0];
+      expect(execution.steps).toHaveLength(2);
+      expect(execution.steps[1]).toEqual(
+        expect.objectContaining({
+          stepId: 'step-2',
+          status: 'failed',
+          error: 'boom',
+        }),
+      );
+      expect(useCatalogStore.getState().metricsHistory.at(-1)).toEqual(
+        expect.objectContaining({
+          completedSteps: 1,
+          failedSteps: 1,
+        }),
+      );
+    });
+
+    it('ignores deltas for unknown executions', () => {
+      useCatalogStore.getState().applyExecutionDelta({
+        id: 'missing-exec',
+        changes: {
+          status: 'completed',
+        },
+      });
+
+      expect(useCatalogStore.getState().executions).toEqual([]);
+      expect(useCatalogStore.getState().metricsHistory).toEqual([]);
+    });
+
+    it('keeps activeExecution synchronized when merging a delta for the selected execution', () => {
+      const execution = {
+        id: 'exec-1',
+        scenarioId: 'scenario-a',
+        mode: 'simulation',
+        status: 'running',
+        steps: [{ stepId: 'step-1', status: 'running', attempts: 1 }],
+      } as any;
+
+      useCatalogStore.setState({
+        executions: [execution],
+        activeExecution: execution,
+      });
+
+      useCatalogStore.getState().applyExecutionDelta({
+        id: 'exec-1',
+        changes: {
+          status: 'completed',
+        },
+      });
+
+      expect(useCatalogStore.getState().activeExecution).toEqual(
+        expect.objectContaining({
+          id: 'exec-1',
+          status: 'completed',
+        }),
+      );
     });
   });
 

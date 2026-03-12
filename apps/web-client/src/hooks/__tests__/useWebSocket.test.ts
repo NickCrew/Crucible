@@ -6,11 +6,13 @@ import { useWebSocket } from '../useWebSocket';
 
 // Mock the store
 const mockUpdateExecution = vi.fn();
+const mockApplyExecutionDelta = vi.fn();
 const mockSetWsConnected = vi.fn();
 
 vi.mock('@/store/useCatalogStore', () => ({
   useCatalogStore: () => ({
     updateExecution: mockUpdateExecution,
+    applyExecutionDelta: mockApplyExecutionDelta,
     setWsConnected: mockSetWsConnected,
   }),
 }));
@@ -93,6 +95,76 @@ describe('useWebSocket', () => {
 
     expect(mockUpdateExecution).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'exec-1', status: 'running' }),
+    );
+    expect(mockApplyExecutionDelta).not.toHaveBeenCalled();
+  });
+
+  it('dispatches execution deltas to the merge path', () => {
+    renderHook(() => useWebSocket());
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+
+    ws.simulateMessage({
+      type: 'EXECUTION_DELTA',
+      format: 'delta',
+      payload: { id: 'exec-1', changes: { status: 'completed' } },
+    });
+
+    expect(mockApplyExecutionDelta).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'exec-1' }),
+    );
+    expect(mockUpdateExecution).not.toHaveBeenCalled();
+  });
+
+  it('routes delta-formatted lifecycle messages through applyExecutionDelta', () => {
+    renderHook(() => useWebSocket());
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+
+    ws.simulateMessage({
+      type: 'EXECUTION_UPDATED',
+      format: 'delta',
+      payload: { id: 'exec-1', changes: { steps: [{ stepId: 'step-1', status: 'running' }] } },
+    });
+
+    expect(mockApplyExecutionDelta).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'exec-1' }),
+    );
+  });
+
+  it('routes STATUS_UPDATE snapshots through updateExecution', () => {
+    renderHook(() => useWebSocket());
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+
+    ws.simulateMessage({
+      type: 'STATUS_UPDATE',
+      format: 'snapshot',
+      payload: { id: 'exec-1', status: 'paused', steps: [] },
+    });
+
+    expect(mockUpdateExecution).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'exec-1', status: 'paused' }),
+    );
+  });
+
+  it('routes terminal lifecycle snapshots through updateExecution', () => {
+    renderHook(() => useWebSocket());
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+
+    ws.simulateMessage({
+      type: 'EXECUTION_COMPLETED',
+      format: 'snapshot',
+      payload: { id: 'exec-1', status: 'completed', steps: [] },
+    });
+
+    expect(mockUpdateExecution).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'exec-1', status: 'completed' }),
     );
   });
 

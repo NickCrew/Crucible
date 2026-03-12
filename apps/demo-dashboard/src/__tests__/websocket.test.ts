@@ -50,6 +50,7 @@ function createMockEngine() {
     cancelExecution: vi.fn(),
     restartExecution: vi.fn(),
     getExecution: vi.fn(),
+    listExecutions: vi.fn(() => []),
     pauseAll: vi.fn(),
     resumeAll: vi.fn(),
     cancelAll: vi.fn(),
@@ -207,6 +208,124 @@ describe('setupWebSocket', () => {
 
       expect(openWs.send).toHaveBeenCalled();
       expect(closedWs.send).not.toHaveBeenCalled();
+    });
+
+    it('sends a full snapshot for the first execution update when no prior state exists', () => {
+      const openWs = createMockWs();
+      wss._simulateConnection(openWs);
+
+      engine.emit('execution:updated', {
+        id: 'exec-1',
+        scenarioId: 'scenario-a',
+        mode: 'simulation',
+        status: 'running',
+        steps: [{ stepId: 'step-1', status: 'running', attempts: 1 }],
+      });
+
+      const sent = JSON.parse(openWs.send.mock.calls[0][0]);
+      expect(sent.type).toBe('EXECUTION_UPDATED');
+      expect(sent.format).toBe('snapshot');
+      expect(sent.payload).toEqual(
+        expect.objectContaining({
+          id: 'exec-1',
+          scenarioId: 'scenario-a',
+        }),
+      );
+    });
+
+    it('sends deltas for repeated execution updates after the initial snapshot', () => {
+      const openWs = createMockWs();
+      wss._simulateConnection(openWs);
+
+      engine.emit('execution:started', {
+        id: 'exec-1',
+        scenarioId: 'scenario-a',
+        mode: 'simulation',
+        status: 'running',
+        steps: [],
+      });
+
+      engine.emit('execution:updated', {
+        id: 'exec-1',
+        scenarioId: 'scenario-a',
+        mode: 'simulation',
+        status: 'running',
+        context: { token: 'abc' },
+        steps: [{ stepId: 'step-1', status: 'running', attempts: 1 }],
+      });
+
+      const sent = JSON.parse(openWs.send.mock.calls[1][0]);
+      expect(sent.type).toBe('EXECUTION_DELTA');
+      expect(sent.format).toBe('delta');
+      expect(sent.payload).toEqual({
+        id: 'exec-1',
+        changes: {
+          context: { token: 'abc' },
+          steps: [{ stepId: 'step-1', status: 'running', attempts: 1 }],
+        },
+      });
+    });
+
+    it('seeds new connections with snapshot status updates for existing executions', () => {
+      (engine.listExecutions as any).mockReturnValue([
+        {
+          id: 'exec-1',
+          scenarioId: 'scenario-a',
+          mode: 'simulation',
+          status: 'running',
+          steps: [{ stepId: 'step-1', status: 'running', attempts: 1 }],
+        },
+      ]);
+
+      const openWs = createMockWs();
+      wss._simulateConnection(openWs);
+
+      expect(openWs.send).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(openWs.send.mock.calls[0][0]);
+      expect(sent.type).toBe('STATUS_UPDATE');
+      expect(sent.format).toBe('snapshot');
+      expect(sent.payload).toEqual(
+        expect.objectContaining({
+          id: 'exec-1',
+          scenarioId: 'scenario-a',
+        }),
+      );
+    });
+
+    it('uses the seeded connection snapshot as the baseline for the next execution delta', () => {
+      (engine.listExecutions as any).mockReturnValue([
+        {
+          id: 'exec-1',
+          scenarioId: 'scenario-a',
+          mode: 'simulation',
+          status: 'running',
+          steps: [{ stepId: 'step-1', status: 'running', attempts: 1 }],
+        },
+      ]);
+
+      const openWs = createMockWs();
+      wss._simulateConnection(openWs);
+
+      engine.emit('execution:updated', {
+        id: 'exec-1',
+        scenarioId: 'scenario-a',
+        mode: 'simulation',
+        status: 'running',
+        context: { token: 'abc' },
+        steps: [{ stepId: 'step-1', status: 'completed', attempts: 1 }],
+      });
+
+      expect(openWs.send).toHaveBeenCalledTimes(2);
+      const sent = JSON.parse(openWs.send.mock.calls[1][0]);
+      expect(sent.type).toBe('EXECUTION_DELTA');
+      expect(sent.format).toBe('delta');
+      expect(sent.payload).toEqual({
+        id: 'exec-1',
+        changes: {
+          context: { token: 'abc' },
+          steps: [{ stepId: 'step-1', status: 'completed' }],
+        },
+      });
     });
   });
 });

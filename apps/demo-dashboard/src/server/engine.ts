@@ -886,6 +886,10 @@ export class ScenarioEngine extends EventEmitter {
   getExecution(executionId: string): ScenarioExecution | undefined {
     return this.executions.get(executionId) ?? this.repo?.getExecution(executionId);
   }
+
+  listExecutions(): ScenarioExecution[] {
+    return Array.from(this.executions.values());
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────

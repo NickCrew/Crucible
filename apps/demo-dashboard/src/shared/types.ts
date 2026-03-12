@@ -31,6 +31,10 @@ export interface ExecutionStepResult {
   assertions?: AssertionResult[];
 }
 
+export interface ExecutionStepDelta extends Partial<Omit<ExecutionStepResult, 'stepId'>> {
+  stepId: string;
+}
+
 export type ExecutionMode = 'simulation' | 'assessment';
 
 export interface ScenarioExecution {
@@ -53,6 +57,13 @@ export interface ScenarioExecution {
     passed: boolean;
     score: number;
     artifacts: string[];
+  };
+}
+
+export interface ScenarioExecutionDelta {
+  id: string;
+  changes: Partial<Omit<ScenarioExecution, 'id' | 'steps'>> & {
+    steps?: ExecutionStepDelta[];
   };
 }
 
@@ -84,6 +95,7 @@ export interface DashboardCommand extends WebSocketMessage {
 export interface DashboardEvent {
   type:
     | 'EXECUTION_STARTED'
+    | 'EXECUTION_DELTA'
     | 'EXECUTION_UPDATED'
     | 'EXECUTION_COMPLETED'
     | 'EXECUTION_FAILED'
@@ -92,6 +104,7 @@ export interface DashboardEvent {
     | 'EXECUTION_RESUMED'
     | 'STATUS_UPDATE'
     | 'SCENARIOS_LIST';
-  payload: ScenarioExecution | Record<string, unknown>;
+  payload: ScenarioExecution | ScenarioExecutionDelta | Record<string, unknown>;
+  format?: 'snapshot' | 'delta';
   timestamp: number;
 }
