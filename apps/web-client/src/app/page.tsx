@@ -1,22 +1,24 @@
-"use client";
+'use client';
 
-import { useCatalogStore } from "@/store/useCatalogStore";
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Activity, ShieldCheck, Database, Zap, ArrowRight } from "lucide-react";
-import Link from "next/link";
-import { useEffect } from "react";
+import { useCatalogStore } from '@/store/useCatalogStore';
+import { ExecutionMetricsChart } from '@/components/execution-metrics-chart';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Activity, ShieldCheck, Database, Zap, ArrowRight } from 'lucide-react';
+import Link from 'next/link';
+import { useEffect } from 'react';
 
 export default function Dashboard() {
-  const { scenarios, executions, fetchScenarios } = useCatalogStore();
+  const { scenarios, executions, fetchScenarios, metricsHistory, metricsThrottleMs } =
+    useCatalogStore();
 
   useEffect(() => {
     fetchScenarios();
   }, [fetchScenarios]);
 
-  const categories = Array.from(new Set(scenarios.map(s => s.category).filter(Boolean)));
-  const runningCount = executions.filter(e => e.status === "running").length;
+  const categories = Array.from(new Set(scenarios.map((s) => s.category).filter(Boolean)));
+  const runningCount = executions.filter((e) => e.status === 'running').length;
   const lastExecution = executions[0];
 
   return (
@@ -36,7 +38,11 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="type-label text-muted-foreground">Active Simulations</CardTitle>
-            <Zap className={runningCount > 0 ? "h-4 w-4 text-primary" : "h-4 w-4 text-muted-foreground"} />
+            <Zap
+              className={
+                runningCount > 0 ? 'h-4 w-4 text-primary' : 'h-4 w-4 text-muted-foreground'
+              }
+            />
           </CardHeader>
           <CardContent>
             <div className="type-metric">{runningCount}</div>
@@ -60,10 +66,10 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="type-metric">
-              {lastExecution ? lastExecution.status.toUpperCase() : "N/A"}
+              {lastExecution ? lastExecution.status.toUpperCase() : 'N/A'}
             </div>
             <p className="type-body text-muted-foreground">
-              {lastExecution ? `Scenario ${lastExecution.scenarioId}` : "No recent activity"}
+              {lastExecution ? `Scenario ${lastExecution.scenarioId}` : 'No recent activity'}
             </p>
           </CardContent>
         </Card>
@@ -74,10 +80,12 @@ export default function Dashboard() {
         <Card className="col-span-4">
           <CardHeader>
             <CardTitle>Overview</CardTitle>
-            <CardDescription>Performance metrics across attack vectors</CardDescription>
+            <CardDescription>
+              Buffered execution telemetry with throttled chart updates
+            </CardDescription>
           </CardHeader>
-          <CardContent className="h-[300px] flex items-center justify-center border-t border-dashed border-border/50 mt-4 bg-muted/30 rounded-lg">
-            <p className="type-data text-muted-foreground">TELEMETRY_FEED :: AWAITING_DATA</p>
+          <CardContent className="mt-4 border-t border-border/50 pt-4">
+            <ExecutionMetricsChart history={metricsHistory} throttleMs={metricsThrottleMs} />
           </CardContent>
         </Card>
 
@@ -87,7 +95,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {scenarios.slice(0, 5).map(scenario => (
+              {scenarios.slice(0, 5).map((scenario) => (
                 <div key={scenario.id} className="flex items-center">
                   <div className="space-y-1">
                     <p className="type-body font-medium leading-none">{scenario.name}</p>
@@ -95,7 +103,7 @@ export default function Dashboard() {
                   </div>
                   <div className="ml-auto">
                     <Badge variant="outline" className="type-tag">
-                      {scenario.difficulty || "Beginner"}
+                      {scenario.difficulty || 'Beginner'}
                     </Badge>
                   </div>
                 </div>

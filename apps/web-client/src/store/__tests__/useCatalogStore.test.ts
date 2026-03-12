@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useCatalogStore } from '../useCatalogStore';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { catalogInitialState, useCatalogStore } from '../useCatalogStore';
 
 // ── TASK-15: useCatalogStore operations and error handling ────────────
 
@@ -18,15 +18,15 @@ function mockJsonResponse(status: number, data: unknown) {
 describe('useCatalogStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset store to initial state
+    useCatalogStore.getState().resetMetricsHistory();
     useCatalogStore.setState({
-      scenarios: [],
-      executions: [],
-      activeExecution: null,
-      isLoading: false,
-      error: null,
-      wsConnected: false,
+      ...catalogInitialState,
     });
+  });
+
+  afterEach(() => {
+    useCatalogStore.getState().resetMetricsHistory();
+    vi.useRealTimers();
   });
 
   describe('initial state', () => {
@@ -35,6 +35,7 @@ describe('useCatalogStore', () => {
       expect(state.scenarios).toEqual([]);
       expect(state.executions).toEqual([]);
       expect(state.activeExecution).toBeNull();
+      expect(state.metricsHistory).toEqual([]);
       expect(state.isLoading).toBe(false);
       expect(state.error).toBeNull();
       expect(state.wsConnected).toBe(false);
@@ -146,6 +147,124 @@ describe('useCatalogStore', () => {
 
       expect(useCatalogStore.getState().activeExecution?.status).toBe('completed');
     });
+
+    it('records a telemetry sample for the first live update', () => {
+      const execution = {
+        id: 'exec-1',
+        scenarioId: 'a',
+        mode: 'simulation' as const,
+        status: 'running' as const,
+        steps: [
+          { stepId: 'step-a', status: 'running' as const, attempts: 1 },
+          { stepId: 'step-b', status: 'completed' as const, attempts: 1 },
+        ],
+      };
+
+      useCatalogStore.getState().updateExecution(execution as any);
+
+      expect(useCatalogStore.getState().metricsHistory).toEqual([
+        expect.objectContaining({
+          activeExecutions: 1,
+          completedExecutions: 0,
+          failedExecutions: 0,
+          runningSteps: 1,
+          completedSteps: 1,
+          failedSteps: 0,
+        }),
+      ]);
+    });
+
+    it('caps the telemetry buffer at the configured history limit', () => {
+      useCatalogStore.setState({ metricsThrottleMs: 1, metricsHistoryLimit: 2 });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-03-12T05:00:00.000Z'));
+
+      useCatalogStore.getState().updateExecution({
+        id: 'exec-1',
+        scenarioId: 'a',
+        mode: 'simulation',
+        status: 'running',
+        steps: [{ stepId: 'step-1', status: 'running', attempts: 1 }],
+      } as any);
+
+      vi.advanceTimersByTime(2);
+      useCatalogStore.getState().updateExecution({
+        id: 'exec-2',
+        scenarioId: 'b',
+        mode: 'simulation',
+        status: 'completed',
+        steps: [{ stepId: 'step-2', status: 'completed', attempts: 1 }],
+      } as any);
+
+      vi.advanceTimersByTime(2);
+      useCatalogStore.getState().updateExecution({
+        id: 'exec-3',
+        scenarioId: 'c',
+        mode: 'simulation',
+        status: 'failed',
+        steps: [{ stepId: 'step-3', status: 'failed', attempts: 1 }],
+      } as any);
+
+      const history = useCatalogStore.getState().metricsHistory;
+      expect(history).toHaveLength(2);
+      expect(history[0]).toEqual(
+        expect.objectContaining({
+          completedExecutions: 1,
+          completedSteps: 1,
+        }),
+      );
+      expect(history[1]).toEqual(
+        expect.objectContaining({
+          failedExecutions: 1,
+          failedSteps: 1,
+        }),
+      );
+
+      vi.useRealTimers();
+    });
+
+    it('throttles telemetry sampling and flushes the latest state on a trailing timer', () => {
+      useCatalogStore.setState({ metricsThrottleMs: 500, metricsHistoryLimit: 6 });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-03-12T05:10:00.000Z'));
+
+      useCatalogStore.getState().updateExecution({
+        id: 'exec-1',
+        scenarioId: 'a',
+        mode: 'simulation',
+        status: 'running',
+        steps: [{ stepId: 'step-1', status: 'running', attempts: 1 }],
+      } as any);
+
+      expect(useCatalogStore.getState().metricsHistory).toHaveLength(1);
+
+      useCatalogStore.getState().updateExecution({
+        id: 'exec-1',
+        scenarioId: 'a',
+        mode: 'simulation',
+        status: 'running',
+        steps: [{ stepId: 'step-1', status: 'completed', attempts: 1 }],
+      } as any);
+
+      expect(useCatalogStore.getState().metricsHistory).toHaveLength(1);
+
+      vi.advanceTimersByTime(499);
+      expect(useCatalogStore.getState().metricsHistory).toHaveLength(1);
+
+      vi.advanceTimersByTime(1);
+      expect(useCatalogStore.getState().metricsHistory).toHaveLength(2);
+      expect(useCatalogStore.getState().metricsHistory[1]).toEqual(
+        expect.objectContaining({
+          activeExecutions: 1,
+          completedSteps: 1,
+          runningSteps: 0,
+        }),
+      );
+
+      vi.useRealTimers();
+    });
   });
 
   describe('setActiveExecution', () => {
@@ -179,9 +298,7 @@ describe('useCatalogStore', () => {
 
   describe('startSimulation', () => {
     it('returns execution ID on success', async () => {
-      mockFetch.mockResolvedValueOnce(
-        mockJsonResponse(200, { executionId: 'exec-123' }),
-      );
+      mockFetch.mockResolvedValueOnce(mockJsonResponse(200, { executionId: 'exec-123' }));
 
       const id = await useCatalogStore.getState().startSimulation('scenario-1');
 
@@ -191,9 +308,9 @@ describe('useCatalogStore', () => {
     it('sets error and throws on failure', async () => {
       mockFetch.mockResolvedValueOnce(mockJsonResponse(500, {}));
 
-      await expect(
-        useCatalogStore.getState().startSimulation('scenario-1'),
-      ).rejects.toThrow('Failed to start simulation');
+      await expect(useCatalogStore.getState().startSimulation('scenario-1')).rejects.toThrow(
+        'Failed to start simulation',
+      );
 
       expect(useCatalogStore.getState().error).toBe('Failed to start simulation');
     });
@@ -212,9 +329,7 @@ describe('useCatalogStore', () => {
     });
 
     it('sets error when pause fails', async () => {
-      mockFetch.mockResolvedValueOnce(
-        mockJsonResponse(400, { error: 'Not running' }),
-      );
+      mockFetch.mockResolvedValueOnce(mockJsonResponse(400, { error: 'Not running' }));
 
       await useCatalogStore.getState().pauseExecution('exec-1');
 
