@@ -2,25 +2,82 @@
 
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { ExecutionMetricsChart } from '@/components/execution-metrics-chart';
-import { RemoteTerminal } from '@/components/remote-terminal';
+import { AssessmentTrendPanel } from '@/components/assessment-trend-panel';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Activity, ShieldCheck, Database, Zap, ArrowRight } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import type { ScenarioExecution } from '@/store/useCatalogStore';
+
+const RemoteTerminal = dynamic(
+  () => import('@/components/remote-terminal').then((mod) => mod.RemoteTerminal),
+  { ssr: false },
+);
+
+export const DEFAULT_API_BASE = 'http://localhost:3001/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_BASE;
 
 export default function Dashboard() {
   const { scenarios, executions, activeExecution, fetchScenarios, metricsHistory, metricsThrottleMs } =
     useCatalogStore();
+  const [historicalAssessments, setHistoricalAssessments] = useState<ScenarioExecution[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchScenarios();
   }, [fetchScenarios]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadAssessmentHistory = async () => {
+      setHistoryLoading(true);
+      setHistoryError(null);
+
+      try {
+        const response = await fetch(`${API_BASE}/executions?mode=assessment&limit=50`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Assessment history request failed (${response.status})`);
+        }
+
+        const data = (await response.json()) as ScenarioExecution[];
+        if (controller.signal.aborted) {
+          return;
+        }
+        setHistoricalAssessments(data);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setHistoryError(error instanceof Error ? error.message : 'Failed to load assessment history');
+      } finally {
+        if (!controller.signal.aborted) {
+          setHistoryLoading(false);
+        }
+      }
+    };
+
+    void loadAssessmentHistory();
+
+    return () => {
+      controller.abort();
+    };
+  }, [API_BASE]);
+
   const categories = Array.from(new Set(scenarios.map((s) => s.category).filter(Boolean)));
   const runningCount = executions.filter((e) => e.status === 'running').length;
   const lastExecution = executions[0];
+  const assessmentExecutions = mergeAssessmentExecutions(
+    historicalAssessments,
+    executions.filter((execution) => execution.mode === 'assessment'),
+  );
 
   return (
     <div className="space-y-8">
@@ -122,6 +179,25 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-12">
+        <Card className="col-span-12">
+          <CardHeader>
+            <CardTitle>Assessment Trends</CardTitle>
+            <CardDescription>
+              Persisted assessment history blended with live execution updates.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="mt-4 border-t border-border/50 pt-4">
+            <AssessmentTrendPanel
+              assessments={assessmentExecutions}
+              scenarios={scenarios}
+              isLoading={historyLoading}
+              error={historyError}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Active Terminal Row */}
       {(activeExecution && (activeExecution.status === 'running' || activeExecution.status === 'paused')) && (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -135,5 +211,25 @@ export default function Dashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+function mergeAssessmentExecutions(
+  historicalAssessments: ScenarioExecution[],
+  liveAssessments: ScenarioExecution[],
+): ScenarioExecution[] {
+  const merged = new Map<string, ScenarioExecution>();
+
+  for (const execution of historicalAssessments) {
+    merged.set(execution.id, execution);
+  }
+
+  for (const execution of liveAssessments) {
+    merged.set(execution.id, execution);
+  }
+
+  return Array.from(merged.values()).sort(
+    (left, right) =>
+      (right.completedAt ?? right.startedAt ?? 0) - (left.completedAt ?? left.startedAt ?? 0),
   );
 }
