@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Scenario } from '@crucible/catalog';
 
 // ── Types (mirrors demo-dashboard/shared/types.ts) ──────────────────
@@ -36,6 +37,21 @@ export interface ExecutionStepResult {
   completedAt?: number;
   duration?: number;
   result?: Record<string, unknown>;
+  details?: {
+    response?: {
+      status: number;
+      headers: Record<string, string>;
+      body: unknown;
+    };
+    retention?: {
+      policy: string;
+      truncated: boolean;
+      contentType: string;
+      originalBytes: number;
+      storedBytes: number;
+      bodyFormat: 'json' | 'text';
+    };
+  };
   error?: string;
   logs?: string[];
   attempts: number;
@@ -61,6 +77,7 @@ export interface ScenarioExecution {
   context?: Record<string, unknown>;
   pausedState?: PausedState;
   parentExecutionId?: string;
+  targetUrl?: string;
   report?: {
     summary: string;
     passed: boolean;
@@ -104,6 +121,8 @@ interface CatalogState {
   error: string | null;
   wsConnected: boolean;
   targetUrl: string | null;
+  targetStatus: 'online' | 'offline' | 'unknown';
+  pinnedScenarioIds: string[];
 
   fetchScenarios: () => Promise<void>;
   fetchHealth: () => Promise<void>;
@@ -117,6 +136,9 @@ interface CatalogState {
   clearError: () => void;
   resetMetricsHistory: () => void;
 
+  sendMessage: (msg: any) => void;
+  onMessage: (handler: (msg: any) => void) => () => void;
+
   pauseExecution: (id: string) => Promise<void>;
   resumeExecution: (id: string) => Promise<void>;
   cancelExecution: (id: string) => Promise<void>;
@@ -124,6 +146,11 @@ interface CatalogState {
   pauseAll: () => Promise<number>;
   resumeAll: () => Promise<number>;
   cancelAll: () => Promise<number>;
+
+  togglePinnedScenario: (id: string) => void;
+  setTargetUrl: (url: string | null) => void;
+  sanitizeTransientState: () => void;
+  destroy: () => void;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
@@ -148,6 +175,8 @@ type CatalogStateSnapshot = Pick<
   | 'error'
   | 'wsConnected'
   | 'targetUrl'
+  | 'targetStatus'
+  | 'pinnedScenarioIds'
 >;
 
 export const catalogInitialState: CatalogStateSnapshot = {
@@ -161,266 +190,348 @@ export const catalogInitialState: CatalogStateSnapshot = {
   error: null,
   wsConnected: false,
   targetUrl: null,
+  targetStatus: 'unknown',
+  pinnedScenarioIds: [],
 };
 
-export const useCatalogStore = create<CatalogState>((set, get) => {
-  let metricsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+export const useCatalogStore = create<CatalogState>()(
+  persist(
+    (set, get) => {
+      let metricsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+      const messageHandlers = new Set<(msg: any) => void>();
 
-  const clearMetricsFlushTimer = (): void => {
-    if (metricsFlushTimer) {
-      clearTimeout(metricsFlushTimer);
-      metricsFlushTimer = null;
-    }
-  };
+      const clearMetricsFlushTimer = (): void => {
+        if (metricsFlushTimer) {
+          clearTimeout(metricsFlushTimer);
+          metricsFlushTimer = null;
+        }
+      };
 
-  const captureMetricsSample = (timestamp: number): void => {
-    clearMetricsFlushTimer();
+      const captureMetricsSample = (timestamp: number): void => {
+        clearMetricsFlushTimer();
 
-    set((state) => {
-      const point: ExecutionMetricsPoint = {
-        timestamp,
-        ...deriveMetricsSnapshot(state.executions),
+        set((state) => {
+          const point: ExecutionMetricsPoint = {
+            timestamp,
+            ...deriveMetricsSnapshot(state.executions),
+          };
+
+          return {
+            metricsHistory: appendMetricsPoint(state.metricsHistory, point, state.metricsHistoryLimit),
+          };
+        });
+      };
+
+      const scheduleMetricsSample = (): void => {
+        const now = Date.now();
+        let nextDelayMs: number | null = null;
+
+        set((state) => {
+          const lastPoint = state.metricsHistory.at(-1);
+
+          if (!lastPoint || now - lastPoint.timestamp >= state.metricsThrottleMs) {
+            return {
+              metricsHistory: appendMetricsPoint(
+                state.metricsHistory,
+                { timestamp: now, ...deriveMetricsSnapshot(state.executions) },
+                state.metricsHistoryLimit,
+              ),
+            };
+          }
+
+          if (!metricsFlushTimer) {
+            nextDelayMs = state.metricsThrottleMs - (now - lastPoint.timestamp);
+          }
+
+          return {};
+        });
+
+        if (nextDelayMs != null && !metricsFlushTimer) {
+          // Keep a trailing sample so the chart settles on the latest execution state.
+          metricsFlushTimer = setTimeout(() => {
+            metricsFlushTimer = null;
+            captureMetricsSample(Date.now());
+          }, nextDelayMs);
+        }
       };
 
       return {
-        metricsHistory: appendMetricsPoint(state.metricsHistory, point, state.metricsHistoryLimit),
+        ...catalogInitialState,
+        fetchHealth: async () => {
+          try {
+            const base = API_BASE.replace(/\/api$/, '');
+            const response = await fetch(`${base}/health`);
+            if (!response.ok) {
+              set({ targetStatus: 'unknown' });
+              return;
+            }
+            const data = await response.json();
+            
+            // Update targetUrl from health if not already set locally
+            let currentTarget = get().targetUrl;
+            if (data.targetUrl && !currentTarget) {
+              currentTarget = data.targetUrl;
+              set({ targetUrl: currentTarget });
+            }
+
+            // Check target liveness if we have a URL
+            if (currentTarget) {
+              try {
+                // Background liveness check
+                const targetRes = await fetch(currentTarget, { 
+                  method: 'HEAD', 
+                  mode: 'no-cors',
+                  signal: AbortSignal.timeout(2000) 
+                });
+                set({ targetStatus: 'online' });
+              } catch {
+                set({ targetStatus: 'offline' });
+              }
+            } else {
+              set({ targetStatus: 'unknown' });
+            }
+          } catch {
+            set({ targetStatus: 'unknown' });
+          }
+        },
+
+        fetchScenarios: async () => {
+          set({ isLoading: true, error: null });
+          try {
+            const response = await fetch(`${API_BASE}/scenarios`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            set({ scenarios: data, isLoading: false });
+          } catch {
+            set({ error: 'Failed to fetch scenarios', isLoading: false });
+          }
+        },
+
+        updateScenario: async (id: string, data: Scenario) => {
+          const response = await fetch(`${API_BASE}/scenarios/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+          });
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+            throw new Error(err.error || `HTTP ${response.status}`);
+          }
+          const updated: Scenario = await response.json();
+          set((state) => ({
+            scenarios: state.scenarios.map((s) => (s.id === id ? updated : s)),
+          }));
+        },
+
+        startSimulation: async (scenarioId: string) => {
+          try {
+            const response = await fetch(`${API_BASE}/simulations`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ scenarioId }),
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const { executionId } = await response.json();
+            return executionId;
+          } catch {
+            set({ error: 'Failed to start simulation' });
+            throw new Error('Failed to start simulation');
+          }
+        },
+
+        startAssessment: async (scenarioId: string) => {
+          try {
+            const response = await fetch(`${API_BASE}/assessments`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ scenarioId }),
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const { executionId } = await response.json();
+            return executionId;
+          } catch {
+            set({ error: 'Failed to start assessment' });
+            throw new Error('Failed to start assessment');
+          }
+        },
+
+        updateExecution: (execution: ScenarioExecution) => {
+          set((state) => {
+            const newExecutions = state.executions.some((e) => e.id === execution.id)
+              ? state.executions.map((e) => (e.id === execution.id ? execution : e))
+              : [execution, ...state.executions];
+
+            const activeExecution =
+              state.activeExecution?.id === execution.id ? execution : state.activeExecution;
+
+            return { executions: newExecutions, activeExecution };
+          });
+
+          scheduleMetricsSample();
+        },
+
+        applyExecutionDelta: (delta: ScenarioExecutionDelta) => {
+          let appliedDelta = false;
+
+          set((state) => {
+            const targetExecution = state.executions.find((execution) => execution.id === delta.id);
+            if (!targetExecution) {
+              return {};
+            }
+
+            appliedDelta = true;
+
+            const mergedExecution = mergeExecutionDelta(targetExecution, delta);
+            const executions = state.executions.map((execution) =>
+              execution.id === delta.id ? mergedExecution : execution,
+            );
+            const activeExecution =
+              state.activeExecution?.id === delta.id ? mergedExecution : state.activeExecution;
+
+            return {
+              executions,
+              activeExecution,
+            };
+          });
+
+          if (appliedDelta) {
+            scheduleMetricsSample();
+          }
+        },
+
+        setActiveExecution: (executionId: string | null) => {
+          if (!executionId) {
+            set({ activeExecution: null });
+            return;
+          }
+          const execution = get().executions.find((e) => e.id === executionId) ?? null;
+          set({ activeExecution: execution });
+        },
+
+        setWsConnected: (connected: boolean) => set({ wsConnected: connected }),
+        clearError: () => set({ error: null }),
+        resetMetricsHistory: () => {
+          clearMetricsFlushTimer();
+          set({ metricsHistory: [] });
+        },
+
+        sendMessage: (msg: any) => {
+          window.dispatchEvent(new CustomEvent('ws:send', { detail: msg }));
+        },
+
+        onMessage: (handler: (msg: any) => void) => {
+          const listener = (e: any) => handler(e.detail);
+          window.addEventListener('ws:message', listener);
+          return () => {
+            window.removeEventListener('ws:message', listener);
+          };
+        },
+
+        pauseExecution: async (id: string) => {
+          const res = await fetch(`${API_BASE}/executions/${id}/pause`, { method: 'POST' });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+            set({ error: err.error });
+          }
+        },
+
+        resumeExecution: async (id: string) => {
+          const res = await fetch(`${API_BASE}/executions/${id}/resume`, { method: 'POST' });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+            set({ error: err.error });
+          }
+        },
+
+        cancelExecution: async (id: string) => {
+          const res = await fetch(`${API_BASE}/executions/${id}/cancel`, { method: 'POST' });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+            set({ error: err.error });
+          }
+        },
+
+        restartExecution: async (id: string) => {
+          const res = await fetch(`${API_BASE}/executions/${id}/restart`, { method: 'POST' });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+            set({ error: err.error });
+            throw new Error(err.error);
+          }
+          const { executionId } = await res.json();
+          return executionId;
+        },
+
+        pauseAll: async () => {
+          const res = await fetch(`${API_BASE}/executions/pause-all`, { method: 'POST' });
+          if (!res.ok) {
+            set({ error: 'Failed to pause all executions' });
+            return 0;
+          }
+          const { count } = await res.json();
+          return count;
+        },
+
+        resumeAll: async () => {
+          const res = await fetch(`${API_BASE}/executions/resume-all`, { method: 'POST' });
+          if (!res.ok) {
+            set({ error: 'Failed to resume all executions' });
+            return 0;
+          }
+          const { count } = await res.json();
+          return count;
+        },
+
+        cancelAll: async () => {
+          const res = await fetch(`${API_BASE}/executions/cancel-all`, { method: 'POST' });
+          if (!res.ok) {
+            set({ error: 'Failed to cancel all executions' });
+            return 0;
+          }
+          const { count } = await res.json();
+          return count;
+        },
+
+        togglePinnedScenario: (id: string) => {
+          set((state) => ({
+            pinnedScenarioIds: state.pinnedScenarioIds.includes(id)
+              ? state.pinnedScenarioIds.filter((pid) => pid !== id)
+              : [...state.pinnedScenarioIds, id],
+          }));
+        },
+
+        setTargetUrl: (url: string | null) => set({ targetUrl: url }),
+
+        sanitizeTransientState: () => {
+          set((state) => {
+            const needsUpdate = state.executions.some(e => e.status === 'running' || e.status === 'paused');
+            if (!needsUpdate) return {};
+
+            return {
+              executions: state.executions.map(e => (
+                (e.status === 'running' || e.status === 'paused')
+                  ? { ...e, status: 'cancelled' as const }
+                  : e
+              ))
+            };
+          });
+        },
+
+        destroy: () => {
+          clearMetricsFlushTimer();
+        },
       };
-    });
-  };
-
-  const scheduleMetricsSample = (): void => {
-    const now = Date.now();
-    let nextDelayMs: number | null = null;
-
-    set((state) => {
-      const lastPoint = state.metricsHistory.at(-1);
-
-      if (!lastPoint || now - lastPoint.timestamp >= state.metricsThrottleMs) {
-        return {
-          metricsHistory: appendMetricsPoint(
-            state.metricsHistory,
-            { timestamp: now, ...deriveMetricsSnapshot(state.executions) },
-            state.metricsHistoryLimit,
-          ),
-        };
-      }
-
-      if (!metricsFlushTimer) {
-        nextDelayMs = state.metricsThrottleMs - (now - lastPoint.timestamp);
-      }
-
-      return {};
-    });
-
-    if (nextDelayMs != null && !metricsFlushTimer) {
-      // Keep a trailing sample so the chart settles on the latest execution state.
-      metricsFlushTimer = setTimeout(() => {
-        metricsFlushTimer = null;
-        captureMetricsSample(Date.now());
-      }, nextDelayMs);
-    }
-  };
-
-  return {
-    ...catalogInitialState,
-    fetchHealth: async () => {
-      try {
-        const base = API_BASE.replace(/\/api$/, '');
-        const response = await fetch(`${base}/health`);
-        if (!response.ok) return;
-        const data = await response.json();
-        if (data.targetUrl) set({ targetUrl: data.targetUrl });
-      } catch {
-        // health check is best-effort
-      }
     },
-
-    fetchScenarios: async () => {
-      set({ isLoading: true, error: null });
-      try {
-        const response = await fetch(`${API_BASE}/scenarios`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        set({ scenarios: data, isLoading: false });
-      } catch {
-        set({ error: 'Failed to fetch scenarios', isLoading: false });
-      }
+    {
+      name: 'crucible-storage',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        targetUrl: state.targetUrl,
+        pinnedScenarioIds: state.pinnedScenarioIds,
+      }),
     },
-
-    updateScenario: async (id: string, data: Scenario) => {
-      const response = await fetch(`${API_BASE}/scenarios/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-        throw new Error(err.error || `HTTP ${response.status}`);
-      }
-      const updated: Scenario = await response.json();
-      set((state) => ({
-        scenarios: state.scenarios.map((s) => (s.id === id ? updated : s)),
-      }));
-    },
-
-    startSimulation: async (scenarioId: string) => {
-      try {
-        const response = await fetch(`${API_BASE}/simulations`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scenarioId }),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const { executionId } = await response.json();
-        return executionId;
-      } catch {
-        set({ error: 'Failed to start simulation' });
-        throw new Error('Failed to start simulation');
-      }
-    },
-
-    startAssessment: async (scenarioId: string) => {
-      try {
-        const response = await fetch(`${API_BASE}/assessments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scenarioId }),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const { executionId } = await response.json();
-        return executionId;
-      } catch {
-        set({ error: 'Failed to start assessment' });
-        throw new Error('Failed to start assessment');
-      }
-    },
-
-    updateExecution: (execution: ScenarioExecution) => {
-      set((state) => {
-        const newExecutions = state.executions.some((e) => e.id === execution.id)
-          ? state.executions.map((e) => (e.id === execution.id ? execution : e))
-          : [execution, ...state.executions];
-
-        const activeExecution =
-          state.activeExecution?.id === execution.id ? execution : state.activeExecution;
-
-        return { executions: newExecutions, activeExecution };
-      });
-
-      scheduleMetricsSample();
-    },
-
-    applyExecutionDelta: (delta: ScenarioExecutionDelta) => {
-      let appliedDelta = false;
-
-      set((state) => {
-        const targetExecution = state.executions.find((execution) => execution.id === delta.id);
-        if (!targetExecution) {
-          return {};
-        }
-
-        appliedDelta = true;
-
-        const mergedExecution = mergeExecutionDelta(targetExecution, delta);
-        const executions = state.executions.map((execution) =>
-          execution.id === delta.id ? mergedExecution : execution,
-        );
-        const activeExecution =
-          state.activeExecution?.id === delta.id ? mergedExecution : state.activeExecution;
-
-        return {
-          executions,
-          activeExecution,
-        };
-      });
-
-      if (appliedDelta) {
-        scheduleMetricsSample();
-      }
-    },
-
-    setActiveExecution: (executionId: string | null) => {
-      if (!executionId) {
-        set({ activeExecution: null });
-        return;
-      }
-      const execution = get().executions.find((e) => e.id === executionId) ?? null;
-      set({ activeExecution: execution });
-    },
-
-    setWsConnected: (connected: boolean) => set({ wsConnected: connected }),
-    clearError: () => set({ error: null }),
-    resetMetricsHistory: () => {
-      clearMetricsFlushTimer();
-      set({ metricsHistory: [] });
-    },
-
-    pauseExecution: async (id: string) => {
-      const res = await fetch(`${API_BASE}/executions/${id}/pause`, { method: 'POST' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        set({ error: err.error });
-      }
-    },
-
-    resumeExecution: async (id: string) => {
-      const res = await fetch(`${API_BASE}/executions/${id}/resume`, { method: 'POST' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        set({ error: err.error });
-      }
-    },
-
-    cancelExecution: async (id: string) => {
-      const res = await fetch(`${API_BASE}/executions/${id}/cancel`, { method: 'POST' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        set({ error: err.error });
-      }
-    },
-
-    restartExecution: async (id: string) => {
-      const res = await fetch(`${API_BASE}/executions/${id}/restart`, { method: 'POST' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        set({ error: err.error });
-        throw new Error(err.error);
-      }
-      const { executionId } = await res.json();
-      return executionId;
-    },
-
-    pauseAll: async () => {
-      const res = await fetch(`${API_BASE}/executions/pause-all`, { method: 'POST' });
-      if (!res.ok) {
-        set({ error: 'Failed to pause all executions' });
-        return 0;
-      }
-      const { count } = await res.json();
-      return count;
-    },
-
-    resumeAll: async () => {
-      const res = await fetch(`${API_BASE}/executions/resume-all`, { method: 'POST' });
-      if (!res.ok) {
-        set({ error: 'Failed to resume all executions' });
-        return 0;
-      }
-      const { count } = await res.json();
-      return count;
-    },
-
-    cancelAll: async () => {
-      const res = await fetch(`${API_BASE}/executions/cancel-all`, { method: 'POST' });
-      if (!res.ok) {
-        set({ error: 'Failed to cancel all executions' });
-        return 0;
-      }
-      const { count } = await res.json();
-      return count;
-    },
-  };
-});
+  ),
+);
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
@@ -488,21 +599,26 @@ function mergeExecutionSteps(
   stepChanges: ExecutionStepDelta[],
 ): ExecutionStepResult[] {
   const stepsById = new Map(existingSteps.map((step) => [step.stepId, step]));
+  const order: string[] = existingSteps.map((s) => s.stepId);
 
   for (const stepChange of stepChanges) {
     const existingStep = stepsById.get(stepChange.stepId);
-    stepsById.set(
-      stepChange.stepId,
-      existingStep ? { ...existingStep, ...stepChange } : (stepChange as ExecutionStepResult),
-    );
-  }
-
-  const mergedSteps = existingSteps.map((step) => stepsById.get(step.stepId) ?? step);
-  for (const stepChange of stepChanges) {
-    if (!existingSteps.some((step) => step.stepId === stepChange.stepId)) {
-      mergedSteps.push(stepChange as ExecutionStepResult);
+    if (existingStep) {
+      stepsById.set(stepChange.stepId, { ...existingStep, ...stepChange });
+    } else {
+      // New step from delta - provide safe defaults for required fields
+      const newStep: ExecutionStepResult = {
+        status: 'pending',
+        attempts: 0,
+        logs: [],
+        assertions: [],
+        details: {},
+        ...stepChange,
+      };
+      stepsById.set(stepChange.stepId, newStep);
+      order.push(stepChange.stepId);
     }
   }
 
-  return mergedSteps;
+  return order.map((id) => stepsById.get(id)!);
 }

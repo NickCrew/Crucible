@@ -1,4 +1,5 @@
-import { mkdirSync } from 'fs';
+import { mkdirSync, realpathSync } from 'fs';
+import { join, basename, resolve, sep } from 'path';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
@@ -7,6 +8,8 @@ import { config } from 'dotenv';
 import { CatalogService, createDb, ExecutionRepository } from '@crucible/catalog';
 import { setupWebSocket } from './websocket.js';
 import { ScenarioEngine } from './engine.js';
+import { ReportService } from './reports.js';
+import { TerminalService } from './terminal.js';
 
 config();
 
@@ -26,11 +29,20 @@ const db = createDb(dbPath);
 const repo = new ExecutionRepository(db);
 repo.ensureTables();
 
+const reportsDir = resolve(process.env.CRUCIBLE_REPORTS_DIR || './data/reports');
+mkdirSync(reportsDir, { recursive: true });
+
+const reportService = new ReportService({ 
+  reportsDir, 
+  baseUrl: process.env.CRUCIBLE_BASE_URL || `http://localhost:${PORT}` 
+});
+
 const catalog = new CatalogService();
-const engine = new ScenarioEngine(catalog, repo);
+const engine = new ScenarioEngine(catalog, repo, reportService);
+const terminal = new TerminalService();
 
 // WebSocket setup
-setupWebSocket(wss, engine);
+setupWebSocket(wss, engine, terminal);
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -198,6 +210,39 @@ app.get('/api/reports/:id', (req, res) => {
     return res.status(202).json(execution);
   }
   res.json(execution.report || execution);
+});
+
+app.get(`/api/reports/:id/${ReportService.JSON_SUFFIX}`, (req, res) => {
+  const { id } = req.params;
+  const execution = engine.getExecution(id);
+  if (!execution || execution.mode !== 'assessment') {
+    return res.status(404).json({ error: 'Report not found' });
+  }
+
+  // Sanitize ID and construct path
+  const safeId = basename(id);
+  const fileName = `${safeId}.${ReportService.JSON_SUFFIX}`;
+  
+  res.sendFile(fileName, { root: reportsDir }, (err) => {
+    if (err) res.status(404).json({ error: 'JSON report file not found' });
+  });
+});
+
+app.get(`/api/reports/:id/${ReportService.PDF_SUFFIX}`, (req, res) => {
+  const { id } = req.params;
+  const execution = engine.getExecution(id);
+  if (!execution || execution.mode !== 'assessment') {
+    return res.status(404).json({ error: 'Report not found' });
+  }
+
+  // Sanitize ID and construct path
+  const safeId = basename(id);
+  const fileName = `${safeId}.${ReportService.PDF_SUFFIX}`;
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.sendFile(fileName, { root: reportsDir }, (err) => {
+    if (err) res.status(404).json({ error: 'PDF report file not found' });
+  });
 });
 
 server.listen(PORT, () => {

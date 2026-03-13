@@ -4,16 +4,18 @@ import { useEffect, useRef } from "react";
 import { useCatalogStore } from "@/store/useCatalogStore";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001";
-const RECONNECT_DELAY = 3000;
+const MIN_RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 30000;
 
 /**
  * Maintains a singleton WebSocket connection to the demo-dashboard server.
  * Dispatches incoming execution events to the Zustand store.
- * Auto-reconnects on disconnect.
+ * Auto-reconnects on disconnect with exponential backoff.
  */
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const reconnectAttempts = useRef(0);
   const { updateExecution, applyExecutionDelta, setWsConnected } = useCatalogStore();
 
   useEffect(() => {
@@ -25,11 +27,14 @@ export function useWebSocket() {
 
       ws.onopen = () => {
         setWsConnected(true);
+        reconnectAttempts.current = 0;
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+          
+          // Core store updates
           switch (msg.type) {
             case "EXECUTION_STARTED":
             case "EXECUTION_UPDATED":
@@ -53,6 +58,13 @@ export function useWebSocket() {
               }
               break;
           }
+
+          // Dispatch to any other listeners (like Terminal)
+          // We use the store's internal messageHandlers indirectly
+          // by letting the store implement its own onmessage logic or
+          // by dispatching a custom event that components can listen to.
+          // For simplicity with Zustand, we'll use a DOM event.
+          window.dispatchEvent(new CustomEvent('ws:message', { detail: msg }));
         } catch {
           // ignore malformed messages
         }
@@ -61,7 +73,14 @@ export function useWebSocket() {
       ws.onclose = () => {
         setWsConnected(false);
         wsRef.current = null;
-        reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY);
+        
+        const delay = Math.min(
+          MAX_RECONNECT_DELAY,
+          MIN_RECONNECT_DELAY * Math.pow(2, reconnectAttempts.current)
+        );
+        
+        reconnectAttempts.current++;
+        reconnectTimer.current = setTimeout(connect, delay);
       };
 
       ws.onerror = () => {
@@ -69,9 +88,18 @@ export function useWebSocket() {
       };
     }
 
+    // Listener for outgoing messages
+    const handleSend = (e: any) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify(e.detail));
+      }
+    };
+
+    window.addEventListener('ws:send', handleSend);
     connect();
 
     return () => {
+      window.removeEventListener('ws:send', handleSend);
       clearTimeout(reconnectTimer.current);
       wsRef.current?.close();
       wsRef.current = null;

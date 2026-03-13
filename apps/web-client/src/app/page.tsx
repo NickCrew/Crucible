@@ -2,6 +2,7 @@
 
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { ExecutionMetricsChart } from '@/components/execution-metrics-chart';
+import { RemoteTerminal } from '@/components/remote-terminal';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +11,7 @@ import Link from 'next/link';
 import { useEffect } from 'react';
 
 export default function Dashboard() {
-  const { scenarios, executions, fetchScenarios, metricsHistory, metricsThrottleMs } =
+  const { scenarios, executions, activeExecution, fetchScenarios, metricsHistory, metricsThrottleMs } =
     useCatalogStore();
 
   useEffect(() => {
@@ -76,8 +77,8 @@ export default function Dashboard() {
       </div>
 
       {/* Main content row */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        <Card className="col-span-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-12">
+        <Card className="col-span-12 lg:col-span-8">
           <CardHeader>
             <CardTitle>Overview</CardTitle>
             <CardDescription>
@@ -89,7 +90,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="col-span-3">
+        <Card className="col-span-12 lg:col-span-4">
           <CardHeader>
             <CardTitle>Recent Scenarios</CardTitle>
           </CardHeader>
@@ -120,6 +121,19 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Active Terminal Row */}
+      {(activeExecution && (activeExecution.status === 'running' || activeExecution.status === 'paused')) && (
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/80 mb-4 flex items-center gap-2">
+            Active Sandbox
+            <span className="h-px w-12 bg-border/50" />
+          </h3>
+          <div className="h-[400px]">
+            <RemoteTerminal executionId={activeExecution.id} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

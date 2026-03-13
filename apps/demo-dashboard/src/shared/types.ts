@@ -25,6 +25,21 @@ export interface ExecutionStepResult {
   completedAt?: number;
   duration?: number;
   result?: Record<string, unknown>;
+  details?: {
+    response?: {
+      status: number;
+      headers: Record<string, string>;
+      body: unknown;
+    };
+    retention?: {
+      policy: string;
+      truncated: boolean;
+      contentType: string;
+      originalBytes: number;
+      storedBytes: number;
+      bodyFormat: 'json' | 'text';
+    };
+  };
   error?: string;
   logs?: string[];
   attempts: number;
@@ -52,6 +67,7 @@ export interface ScenarioExecution {
   context?: Record<string, unknown>;
   pausedState?: PausedState;
   parentExecutionId?: string;
+  targetUrl?: string;
   report?: {
     summary: string;
     passed: boolean;
@@ -84,11 +100,18 @@ export interface DashboardCommand extends WebSocketMessage {
     | 'GET_SCENARIOS'
     | 'PAUSE_ALL'
     | 'RESUME_ALL'
-    | 'CANCEL_ALL';
+    | 'CANCEL_ALL'
+    | 'TERMINAL_START'
+    | 'TERMINAL_DATA'
+    | 'TERMINAL_RESIZE'
+    | 'TERMINAL_STOP';
   payload: {
     scenarioId?: string;
     executionId?: string;
     filters?: Record<string, unknown>;
+    data?: string;
+    cols?: number;
+    rows?: number;
   };
 }
 
@@ -103,7 +126,8 @@ export interface DashboardEvent {
     | 'EXECUTION_CANCELLED'
     | 'EXECUTION_RESUMED'
     | 'STATUS_UPDATE'
-    | 'SCENARIOS_LIST';
+    | 'SCENARIOS_LIST'
+    | 'TERMINAL_OUTPUT';
   payload: ScenarioExecution | ScenarioExecutionDelta | Record<string, unknown>;
   format?: 'snapshot' | 'delta';
   timestamp: number;

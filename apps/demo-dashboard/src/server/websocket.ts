@@ -1,6 +1,7 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import { isDeepStrictEqual } from 'node:util';
 import { ScenarioEngine } from './engine.js';
+import { TerminalService } from './terminal.js';
 import type {
   DashboardCommand,
   DashboardEvent,
@@ -11,26 +12,44 @@ import type {
   WebSocketMessage,
 } from '../shared/types.js';
 
-export function setupWebSocket(wss: WebSocketServer, engine: ScenarioEngine): void {
+export function setupWebSocket(wss: WebSocketServer, engine: ScenarioEngine, terminal: TerminalService): void {
   const executionSnapshots = new Map<string, ScenarioExecution>();
 
+  // Periodic cleanup of stale snapshots (P1-001)
+  const SNAPSHOT_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 mins
+  setInterval(() => {
+    const activeIds = new Set(engine.listExecutions().map((e) => e.id));
+    for (const id of executionSnapshots.keys()) {
+      if (!activeIds.has(id)) {
+        executionSnapshots.delete(id);
+      }
+    }
+  }, SNAPSHOT_CLEANUP_INTERVAL);
+
+  terminal.on('terminal:output', ({ id, data }) => {
+    broadcast(wss, {
+      type: 'TERMINAL_OUTPUT',
+      payload: { executionId: id, data },
+      timestamp: Date.now(),
+    });
+  });
+
   engine.on('execution:started', (execution) => {
-    const snapshot = cloneExecution(execution);
-    executionSnapshots.set(execution.id, snapshot);
-    broadcast(wss, createSnapshotEvent('EXECUTION_STARTED', snapshot));
+    executionSnapshots.set(execution.id, cloneExecution(execution));
+    broadcast(wss, createSnapshotEvent('EXECUTION_STARTED', execution));
   });
 
   engine.on('execution:updated', (execution) => {
-    const snapshot = cloneExecution(execution);
     const previousSnapshot = executionSnapshots.get(execution.id);
-    executionSnapshots.set(execution.id, snapshot);
+    const currentSnapshot = cloneExecution(execution);
+    executionSnapshots.set(execution.id, currentSnapshot);
 
     if (!previousSnapshot) {
-      broadcast(wss, createSnapshotEvent('EXECUTION_UPDATED', snapshot));
+      broadcast(wss, createSnapshotEvent('EXECUTION_UPDATED', execution));
       return;
     }
 
-    const delta = buildExecutionDelta(previousSnapshot, snapshot);
+    const delta = buildExecutionDelta(previousSnapshot, currentSnapshot);
     if (!hasExecutionChanges(delta)) {
       return;
     }
@@ -44,42 +63,35 @@ export function setupWebSocket(wss: WebSocketServer, engine: ScenarioEngine): vo
   });
 
   engine.on('execution:completed', (execution) => {
-    const snapshot = cloneExecution(execution);
     executionSnapshots.delete(execution.id);
-    broadcast(wss, createSnapshotEvent('EXECUTION_COMPLETED', snapshot));
+    broadcast(wss, createSnapshotEvent('EXECUTION_COMPLETED', execution));
   });
 
   engine.on('execution:failed', (execution) => {
-    const snapshot = cloneExecution(execution);
     executionSnapshots.delete(execution.id);
-    broadcast(wss, createSnapshotEvent('EXECUTION_FAILED', snapshot));
+    broadcast(wss, createSnapshotEvent('EXECUTION_FAILED', execution));
   });
 
   engine.on('execution:paused', (execution) => {
-    const snapshot = cloneExecution(execution);
-    executionSnapshots.set(execution.id, snapshot);
-    broadcast(wss, createSnapshotEvent('EXECUTION_PAUSED', snapshot));
+    executionSnapshots.set(execution.id, cloneExecution(execution));
+    broadcast(wss, createSnapshotEvent('EXECUTION_PAUSED', execution));
   });
 
   engine.on('execution:cancelled', (execution) => {
-    const snapshot = cloneExecution(execution);
     executionSnapshots.delete(execution.id);
-    broadcast(wss, createSnapshotEvent('EXECUTION_CANCELLED', snapshot));
+    broadcast(wss, createSnapshotEvent('EXECUTION_CANCELLED', execution));
   });
 
   engine.on('execution:resumed', (execution) => {
-    const snapshot = cloneExecution(execution);
-    executionSnapshots.set(execution.id, snapshot);
-    broadcast(wss, createSnapshotEvent('EXECUTION_RESUMED', snapshot));
+    executionSnapshots.set(execution.id, cloneExecution(execution));
+    broadcast(wss, createSnapshotEvent('EXECUTION_RESUMED', execution));
   });
 
   wss.on('connection', (ws: WebSocket) => {
     console.log('Client connected');
 
     for (const execution of engine.listExecutions()) {
-      const snapshot = cloneExecution(execution);
-      executionSnapshots.set(snapshot.id, snapshot);
-      ws.send(JSON.stringify(createSnapshotEvent('STATUS_UPDATE', snapshot)));
+      ws.send(JSON.stringify(createSnapshotEvent('STATUS_UPDATE', execution)));
     }
 
     ws.on('message', async (message: string) => {
@@ -160,16 +172,44 @@ export function setupWebSocket(wss: WebSocketServer, engine: ScenarioEngine): vo
             engine.cancelAll();
             break;
 
+          case 'TERMINAL_START':
+            if (command.payload.executionId && canAccessTerminal(engine, command.payload.executionId)) {
+              const cols = clamp(command.payload.cols || 80, 10, 500);
+              const rows = clamp(command.payload.rows || 24, 5, 200);
+              terminal.startSession(command.payload.executionId, cols, rows);
+            }
+            break;
+
+          case 'TERMINAL_DATA':
+            if (command.payload.executionId && command.payload.data && canAccessTerminal(engine, command.payload.executionId)) {
+              // Limit data size to prevent resource exhaustion (P1-002)
+              const data = command.payload.data.slice(0, 8192);
+              terminal.sendInput(command.payload.executionId, data);
+            }
+            break;
+
+          case 'TERMINAL_RESIZE':
+            if (command.payload.executionId && command.payload.cols && command.payload.rows && canAccessTerminal(engine, command.payload.executionId)) {
+              const cols = clamp(command.payload.cols, 10, 500);
+              const rows = clamp(command.payload.rows, 5, 200);
+              terminal.resize(command.payload.executionId, cols, rows);
+            }
+            break;
+
+          case 'TERMINAL_STOP':
+            if (command.payload.executionId && canAccessTerminal(engine, command.payload.executionId)) {
+              terminal.stopSession(command.payload.executionId);
+            }
+            break;
+
           case 'GET_STATUS':
             if (command.payload.executionId) {
               const execution = engine.getExecution(command.payload.executionId);
               if (execution) {
-                const snapshot = cloneExecution(execution);
-                executionSnapshots.set(snapshot.id, snapshot);
                 ws.send(
                   JSON.stringify({
                     type: 'STATUS_UPDATE',
-                    payload: snapshot,
+                    payload: execution,
                     format: 'snapshot',
                     timestamp: Date.now(),
                   } as DashboardEvent),
@@ -288,4 +328,15 @@ function cloneValue<T>(value: T): T {
     return value;
   }
   return structuredClone(value);
+}
+
+function canAccessTerminal(engine: ScenarioEngine, executionId: string): boolean {
+  // In a real multi-tenant system, we'd check session ownership here.
+  // For the local dashboard, we just verify the execution actually exists.
+  return !!engine.getExecution(executionId);
+}
+
+function clamp(val: number | undefined, min: number, max: number): number {
+  if (val === undefined) return min;
+  return Math.min(Math.max(val, min), max);
 }

@@ -69,6 +69,13 @@ export function SiteHeader() {
         {/* Spacer */}
         <div className="flex-1" />
 
+        {/* Command Palette Hint */}
+        <div className="mr-4 hidden md:block">
+          <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
+            <span className="text-xs">⌘</span>K
+          </kbd>
+        </div>
+
         {/* Target & connection status */}
         <div className="flex items-center gap-4 type-timestamp">
           {targetUrl && (

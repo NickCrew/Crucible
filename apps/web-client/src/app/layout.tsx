@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Recursive } from "next/font/google";
 import "./globals.css";
 import { SiteHeader } from "@/components/site-header";
+import { AppInitializer } from "@/components/app-initializer";
 
 const recursive = Recursive({
   variable: "--font-recursive",
@@ -24,10 +25,12 @@ export default function RootLayout({
       <body
         className={`${recursive.variable} antialiased min-h-screen flex flex-col`}
       >
-        <SiteHeader />
-        <main className="flex-1 container mx-auto py-6 px-4">
-          {children}
-        </main>
+        <AppInitializer>
+          <SiteHeader />
+          <main className="flex-1 container mx-auto py-6 px-4">
+            {children}
+          </main>
+        </AppInitializer>
       </body>
     </html>
   );

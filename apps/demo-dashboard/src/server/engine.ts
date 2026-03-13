@@ -3,6 +3,7 @@ import { BlockList, isIP } from 'node:net';
 import { nanoid } from 'nanoid';
 import { CatalogService, ExecutionRepository } from '@crucible/catalog';
 import type { Scenario, ScenarioStep } from '@crucible/catalog';
+import { ReportService } from './reports.js';
 import type {
   ScenarioExecution,
   ExecutionStepResult,
@@ -63,6 +64,7 @@ const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 export class ScenarioEngine extends EventEmitter {
   private catalog: CatalogService;
   private repo: ExecutionRepository | null;
+  private reportService: ReportService | null = null;
   private executions: Map<string, ScenarioExecution>;
   private controls: Map<string, ExecutionControl> = new Map();
 
@@ -77,10 +79,11 @@ export class ScenarioEngine extends EventEmitter {
   private stepBodyMaxBytes: number;
   private outboundAllowlist: OutboundAllowlist;
 
-  constructor(catalog: CatalogService, repo?: ExecutionRepository) {
+  constructor(catalog: CatalogService, repo?: ExecutionRepository, reportService?: ReportService) {
     super();
     this.catalog = catalog;
     this.repo = repo ?? null;
+    this.reportService = reportService ?? null;
     this.executions = new Map();
     this.targetUrl = normalizeConfiguredTargetUrl(
       process.env.CRUCIBLE_TARGET_URL ?? DEFAULT_TARGET_URL,
@@ -158,6 +161,7 @@ export class ScenarioEngine extends EventEmitter {
       steps: [],
       triggerData: triggerData || {},
       context: {},
+      targetUrl: this.targetUrl,
       ...(parentExecutionId ? { parentExecutionId } : {}),
     };
 
@@ -348,7 +352,8 @@ export class ScenarioEngine extends EventEmitter {
                 }
 
                 result.status = 'completed';
-                result.result = this.buildPersistedStepResult(response, 'completed');
+                result.details = this.buildPersistedStepResult(response, 'completed');
+                result.result = result.details as any; // Mirror for backward compatibility
                 result.completedAt = Date.now();
                 result.duration = result.completedAt - result.startedAt!;
                 passedSteps++;
@@ -369,9 +374,10 @@ export class ScenarioEngine extends EventEmitter {
                 if (attempt >= maxAttempts) {
                   result.status = 'failed';
                   result.error = err instanceof Error ? err.message : String(err);
-                  result.result = latestResponse
+                  result.details = latestResponse
                     ? this.buildPersistedStepResult(latestResponse, 'failed')
                     : undefined;
+                  result.result = result.details as any; // Mirror for backward compatibility
                   result.completedAt = Date.now();
                   result.duration = result.completedAt - result.startedAt!;
                   this.repo?.upsertStep(execution.id, result);
@@ -520,8 +526,22 @@ export class ScenarioEngine extends EventEmitter {
           summary: `Executed ${totalSteps} steps. ${passedSteps} passed.`,
           passed: score >= 80,
           score,
-          artifacts: [`/api/reports/${execution.id}.pdf`, `/api/reports/${execution.id}.json`],
+          artifacts: [
+            `/api/reports/${execution.id}/${ReportService.PDF_SUFFIX}`,
+            `/api/reports/${execution.id}/${ReportService.JSON_SUFFIX}`,
+          ],
         };
+
+        if (this.reportService) {
+          try {
+            await this.reportService.generateReports(execution, scenario);
+          } catch (err) {
+            console.error(`Failed to generate reports for ${execution.id}:`, err);
+            // Update summary to reflect missing artifacts if generation failed
+            execution.report.summary += ' (Report artifact generation failed)';
+            execution.report.artifacts = [];
+          }
+        }
       }
 
       this.repo?.updateExecution(execution.id, {
@@ -633,7 +653,7 @@ export class ScenarioEngine extends EventEmitter {
   private buildPersistedStepResult(
     response: StepHttpResponse,
     outcome: 'completed' | 'failed',
-  ): ExecutionStepResult['result'] | undefined {
+  ): ExecutionStepResult['details'] | undefined {
     if (this.stepBodyRetention === 'none') {
       return undefined;
     }
@@ -888,7 +908,26 @@ export class ScenarioEngine extends EventEmitter {
   }
 
   listExecutions(): ScenarioExecution[] {
-    return Array.from(this.executions.values());
+    const active = Array.from(this.executions.values());
+    if (!this.repo) return active;
+
+    // Fetch recent historical executions from repo
+    const persisted = this.repo.listExecutions({ limit: 50 });
+    
+    // Merge, preferring active in-memory state for same ID
+    const activeIds = new Set(active.map(e => e.id));
+    const merged = [...active];
+    
+    for (const p of persisted) {
+      if (!activeIds.has(p.id)) {
+        merged.push(p);
+      }
+    }
+
+    // Sort by startedAt desc and limit to top 100
+    return merged
+      .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
+      .slice(0, 100);
   }
 }
 

@@ -27,6 +27,21 @@ export interface ExecutionStepResult {
   completedAt?: number;
   duration?: number;
   result?: Record<string, unknown>;
+  details?: {
+    response?: {
+      status: number;
+      headers: Record<string, string>;
+      body: unknown;
+    };
+    retention?: {
+      policy: string;
+      truncated: boolean;
+      contentType: string;
+      originalBytes: number;
+      storedBytes: number;
+      bodyFormat: 'json' | 'text';
+    };
+  };
   error?: string;
   logs?: string[];
   attempts: number;
@@ -58,6 +73,7 @@ export interface ScenarioExecution {
   context?: Record<string, unknown>;
   pausedState?: PausedState;
   parentExecutionId?: string;
+  targetUrl?: string;
   report?: {
     summary: string;
     passed: boolean;
@@ -76,6 +92,7 @@ export interface ExecutionFilters {
   until?: number;
   limit?: number;
   offset?: number;
+  targetUrl?: string;
 }
 
 // ── Repository ──────────────────────────────────────────────────────
@@ -142,6 +159,27 @@ export class ExecutionRepository {
     this.db.run(sql`CREATE INDEX IF NOT EXISTS idx_steps_execution_id ON execution_steps(execution_id)`);
   }
 
+  // ── Stats ────────────────────────────────────────────────────────
+
+  /**
+   * Get total storage size of all persisted step results and assertions.
+   * Useful for validating retention policy impact.
+   */
+  getStorageStats(): { totalResultBytes: number; totalAssertionBytes: number } {
+    const stats = this.db
+      .select({
+        totalResultBytes: sql<number>`SUM(LENGTH(${executionSteps.result}))`,
+        totalAssertionBytes: sql<number>`SUM(LENGTH(${executionSteps.assertions}))`,
+      })
+      .from(executionSteps)
+      .get();
+
+    return {
+      totalResultBytes: stats?.totalResultBytes ?? 0,
+      totalAssertionBytes: stats?.totalAssertionBytes ?? 0,
+    };
+  }
+
   // ── Write operations ────────────────────────────────────────────
 
   insertExecution(exec: ScenarioExecution): void {
@@ -160,6 +198,7 @@ export class ExecutionRepository {
         context: exec.context ?? null,
         pausedState: exec.pausedState ?? null,
         parentExecutionId: exec.parentExecutionId ?? null,
+        targetUrl: exec.targetUrl ?? null,
         report: exec.report ?? null,
       }).run();
 
@@ -173,7 +212,7 @@ export class ExecutionRepository {
           duration: step.duration ?? null,
           error: step.error ?? null,
           logs: step.logs ?? null,
-          result: step.result ?? null,
+          details: step.details ?? null,
           attempts: step.attempts,
           assertions: step.assertions ?? null,
         }).run();
@@ -196,6 +235,7 @@ export class ExecutionRepository {
     if (fields.context !== undefined) updates.context = fields.context;
     if (fields.pausedState !== undefined) updates.pausedState = fields.pausedState;
     if (fields.parentExecutionId !== undefined) updates.parentExecutionId = fields.parentExecutionId;
+    if (fields.targetUrl !== undefined) updates.targetUrl = fields.targetUrl;
     if (fields.report !== undefined) updates.report = fields.report;
 
     if (Object.keys(updates).length === 0) return;
@@ -228,7 +268,7 @@ export class ExecutionRepository {
           duration: step.duration ?? null,
           error: step.error ?? null,
           logs: step.logs ?? null,
-          result: step.result ?? null,
+          details: step.details ?? null,
           attempts: step.attempts,
           assertions: step.assertions ?? null,
         })
@@ -283,6 +323,9 @@ export class ExecutionRepository {
     if (filters?.until) {
       conditions.push(lte(executions.startedAt, filters.until));
     }
+    if (filters?.targetUrl) {
+      conditions.push(eq(executions.targetUrl, filters.targetUrl));
+    }
 
     let query = this.db
       .select()
@@ -334,7 +377,7 @@ export class ExecutionRepository {
       duration: step.duration ?? null,
       error: step.error ?? null,
       logs: step.logs ?? null,
-      result: step.result ?? null,
+      details: step.details ?? null,
       attempts: step.attempts,
       assertions: step.assertions ?? null,
     }).run();
@@ -357,7 +400,8 @@ export class ExecutionRepository {
         duration: s.duration ?? undefined,
         error: s.error ?? undefined,
         logs: (s.logs as string[] | null) ?? undefined,
-        result: (s.result as Record<string, unknown> | null) ?? undefined,
+        details: (s.details as ExecutionStepResult['details']) ?? undefined,
+        result: (s.details as Record<string, unknown> | null) ?? undefined, // Legacy fallback
         attempts: s.attempts,
         assertions: (s.assertions as AssertionResult[] | null) ?? undefined,
       })),
@@ -372,6 +416,7 @@ export class ExecutionRepository {
     if (row.context != null) exec.context = row.context as Record<string, unknown>;
     if (row.pausedState != null) exec.pausedState = row.pausedState as PausedState;
     if (row.parentExecutionId != null) exec.parentExecutionId = row.parentExecutionId;
+    if (row.targetUrl != null) exec.targetUrl = row.targetUrl;
     if (row.report != null) exec.report = row.report as ScenarioExecution['report'];
 
     return exec;
