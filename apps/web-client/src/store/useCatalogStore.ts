@@ -103,10 +103,27 @@ export interface ExecutionMetricsPoint {
   failedSteps: number;
 }
 
+export interface ExecutionHistoryFilters {
+  scenarioId: string;
+  status: '' | ExecutionStatus;
+  mode: '' | ScenarioExecution['mode'];
+  dateFrom: string;
+  dateTo: string;
+}
+
 type ExecutionMetricsSnapshot = Omit<ExecutionMetricsPoint, 'timestamp'>;
 
 const DEFAULT_METRICS_HISTORY_LIMIT = 60;
 const DEFAULT_METRICS_THROTTLE_MS = 500;
+const DEFAULT_HISTORY_PAGE_SIZE = 10;
+
+export const defaultExecutionHistoryFilters: ExecutionHistoryFilters = {
+  scenarioId: '',
+  status: '',
+  mode: '',
+  dateFrom: '',
+  dateTo: '',
+};
 
 // ── Store ────────────────────────────────────────────────────────────
 
@@ -114,6 +131,15 @@ interface CatalogState {
   scenarios: Scenario[];
   executions: ScenarioExecution[];
   activeExecution: ScenarioExecution | null;
+  historyExecutions: ScenarioExecution[];
+  historyFilters: ExecutionHistoryFilters;
+  historyPageSize: number;
+  historyOffset: number;
+  historyHasNextPage: boolean;
+  historyIsLoading: boolean;
+  historyIsRefreshing: boolean;
+  historyError: string | null;
+  historyInitialized: boolean;
   metricsHistory: ExecutionMetricsPoint[];
   metricsHistoryLimit: number;
   metricsThrottleMs: number;
@@ -125,6 +151,13 @@ interface CatalogState {
   pinnedScenarioIds: string[];
 
   fetchScenarios: () => Promise<void>;
+  fetchExecutionHistory: (options?: {
+    reset?: boolean;
+    filters?: Partial<ExecutionHistoryFilters>;
+  }) => Promise<void>;
+  updateHistoryFilters: (updates: Partial<ExecutionHistoryFilters>) => Promise<void>;
+  loadOlderExecutionHistory: () => Promise<void>;
+  resetExecutionHistory: () => void;
   fetchHealth: () => Promise<void>;
   updateScenario: (id: string, data: Scenario) => Promise<void>;
   startSimulation: (scenarioId: string) => Promise<string>;
@@ -168,6 +201,15 @@ type CatalogStateSnapshot = Pick<
   | 'scenarios'
   | 'executions'
   | 'activeExecution'
+  | 'historyExecutions'
+  | 'historyFilters'
+  | 'historyPageSize'
+  | 'historyOffset'
+  | 'historyHasNextPage'
+  | 'historyIsLoading'
+  | 'historyIsRefreshing'
+  | 'historyError'
+  | 'historyInitialized'
   | 'metricsHistory'
   | 'metricsHistoryLimit'
   | 'metricsThrottleMs'
@@ -183,6 +225,15 @@ export const catalogInitialState: CatalogStateSnapshot = {
   scenarios: [],
   executions: [],
   activeExecution: null,
+  historyExecutions: [],
+  historyFilters: defaultExecutionHistoryFilters,
+  historyPageSize: DEFAULT_HISTORY_PAGE_SIZE,
+  historyOffset: 0,
+  historyHasNextPage: false,
+  historyIsLoading: false,
+  historyIsRefreshing: false,
+  historyError: null,
+  historyInitialized: false,
   metricsHistory: [],
   metricsHistoryLimit: METRICS_HISTORY_LIMIT,
   metricsThrottleMs: METRICS_THROTTLE_MS,
@@ -199,6 +250,7 @@ export const useCatalogStore = create<CatalogState>()(
     (set, get) => {
       let metricsFlushTimer: ReturnType<typeof setTimeout> | null = null;
       const messageHandlers = new Set<(msg: any) => void>();
+      let latestHistoryRequestId = 0;
 
       const clearMetricsFlushTimer = (): void => {
         if (metricsFlushTimer) {
@@ -307,6 +359,100 @@ export const useCatalogStore = create<CatalogState>()(
           }
         },
 
+        fetchExecutionHistory: async (options) => {
+          const reset = options?.reset ?? false;
+          const state = get();
+          const requestId = ++latestHistoryRequestId;
+          const filters: ExecutionHistoryFilters = {
+            ...state.historyFilters,
+            ...options?.filters,
+          };
+          const offset = reset ? 0 : state.historyOffset;
+          const isInitialLoad = !state.historyInitialized;
+
+          set({
+            historyFilters: filters,
+            historyError: null,
+            historyIsLoading: isInitialLoad,
+            historyIsRefreshing: !isInitialLoad,
+            ...(reset
+              ? {
+                  historyExecutions: [],
+                  historyOffset: 0,
+                  historyHasNextPage: false,
+                }
+              : {}),
+          });
+
+          try {
+            const response = await fetch(buildExecutionHistoryUrl(filters, state.historyPageSize, offset));
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data: ScenarioExecution[] = await response.json();
+            if (requestId !== latestHistoryRequestId) {
+              return;
+            }
+
+            set((current) => ({
+              historyExecutions: reset
+                ? data
+                : [...current.historyExecutions, ...data.filter((execution) => (
+                    !current.historyExecutions.some((existing) => existing.id === execution.id)
+                  ))],
+              historyOffset: offset + data.length,
+              historyHasNextPage: data.length === current.historyPageSize,
+              historyIsLoading: false,
+              historyIsRefreshing: false,
+              historyError: null,
+              historyInitialized: true,
+              historyFilters: filters,
+            }));
+          } catch {
+            if (requestId !== latestHistoryRequestId) {
+              return;
+            }
+
+            set((current) => ({
+              historyExecutions: reset ? [] : current.historyExecutions,
+              historyOffset: reset ? 0 : current.historyOffset,
+              historyHasNextPage: false,
+              historyIsLoading: false,
+              historyIsRefreshing: false,
+              historyError: 'Failed to load execution history.',
+              historyInitialized: true,
+              historyFilters: filters,
+            }));
+          }
+        },
+
+        updateHistoryFilters: async (updates) => {
+          await get().fetchExecutionHistory({
+            reset: true,
+            filters: updates,
+          });
+        },
+
+        loadOlderExecutionHistory: async () => {
+          const state = get();
+          if (state.historyIsLoading || state.historyIsRefreshing || !state.historyHasNextPage) {
+            return;
+          }
+
+          await get().fetchExecutionHistory();
+        },
+
+        resetExecutionHistory: () => {
+          set({
+            historyExecutions: [],
+            historyFilters: defaultExecutionHistoryFilters,
+            historyOffset: 0,
+            historyHasNextPage: false,
+            historyIsLoading: false,
+            historyIsRefreshing: false,
+            historyError: null,
+            historyInitialized: false,
+          });
+        },
+
         updateScenario: async (id: string, data: Scenario) => {
           const response = await fetch(`${API_BASE}/scenarios/${id}`, {
             method: 'PUT',
@@ -360,11 +506,14 @@ export const useCatalogStore = create<CatalogState>()(
             const newExecutions = state.executions.some((e) => e.id === execution.id)
               ? state.executions.map((e) => (e.id === execution.id ? execution : e))
               : [execution, ...state.executions];
+            const historyExecutions = state.historyExecutions.some((e) => e.id === execution.id)
+              ? state.historyExecutions.map((e) => (e.id === execution.id ? execution : e))
+              : state.historyExecutions;
 
             const activeExecution =
               state.activeExecution?.id === execution.id ? execution : state.activeExecution;
 
-            return { executions: newExecutions, activeExecution };
+            return { executions: newExecutions, activeExecution, historyExecutions };
           });
 
           scheduleMetricsSample();
@@ -385,11 +534,17 @@ export const useCatalogStore = create<CatalogState>()(
             const executions = state.executions.map((execution) =>
               execution.id === delta.id ? mergedExecution : execution,
             );
+            const historyExecutions = state.historyExecutions.some((execution) => execution.id === delta.id)
+              ? state.historyExecutions.map((execution) => (
+                  execution.id === delta.id ? mergeExecutionDelta(execution, delta) : execution
+                ))
+              : state.historyExecutions;
             const activeExecution =
               state.activeExecution?.id === delta.id ? mergedExecution : state.activeExecution;
 
             return {
               executions,
+              historyExecutions,
               activeExecution,
             };
           });
@@ -536,6 +691,38 @@ export const useCatalogStore = create<CatalogState>()(
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function buildExecutionHistoryUrl(
+  filters: ExecutionHistoryFilters,
+  limit: number,
+  offset: number,
+): string {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+
+  if (filters.scenarioId) params.set('scenarioId', filters.scenarioId);
+  if (filters.status) params.set('status', filters.status);
+  if (filters.mode) params.set('mode', filters.mode);
+
+  const since = toStartOfDayTimestamp(filters.dateFrom);
+  const until = toEndOfDayTimestamp(filters.dateTo);
+  if (since !== undefined) params.set('since', String(since));
+  if (until !== undefined) params.set('until', String(until));
+
+  return `${API_BASE}/executions?${params.toString()}`;
+}
+
+function toStartOfDayTimestamp(value: string): number | undefined {
+  if (!value) return undefined;
+  return new Date(`${value}T00:00:00`).getTime();
+}
+
+function toEndOfDayTimestamp(value: string): number | undefined {
+  if (!value) return undefined;
+  return new Date(`${value}T23:59:59.999`).getTime();
 }
 
 function appendMetricsPoint(

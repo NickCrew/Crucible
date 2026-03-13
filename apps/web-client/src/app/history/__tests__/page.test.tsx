@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import HistoryPage from "../page";
+import { catalogInitialState, useCatalogStore } from "@/store/useCatalogStore";
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch as typeof fetch;
@@ -47,6 +48,10 @@ function getLastExecutionUrl(): string {
 describe("HistoryPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useCatalogStore.getState().resetMetricsHistory();
+    useCatalogStore.setState({
+      ...catalogInitialState,
+    });
 
     scenarioResponse = {
       status: 200,
@@ -136,37 +141,33 @@ describe("HistoryPage", () => {
     });
   });
 
-  it("paginates through execution results", async () => {
+  it("loads older execution history on demand", async () => {
     render(<HistoryPage />);
     await screen.findAllByRole("link", { name: /view details/i });
 
-    const nextButton = screen.getByRole("button", { name: /next/i });
-    const previousButton = screen.getByRole("button", { name: /previous/i });
+    const loadOlderButton = screen.getByRole("button", { name: /load older/i });
 
-    expect(previousButton).toBeDisabled();
-    fireEvent.click(nextButton);
+    fireEvent.click(loadOlderButton);
 
     await waitFor(() => expect(getLastExecutionUrl()).toContain("offset=10"));
     expect(await screen.findByText("exec-11")).toBeInTheDocument();
+    expect(screen.getByText("exec-1")).toBeInTheDocument();
     expect(screen.getByText("41% FAIL")).toBeInTheDocument();
-    expect(nextButton).toBeDisabled();
-
-    fireEvent.click(previousButton);
-
-    await waitFor(() => expect(getLastExecutionUrl()).toContain("offset=0"));
+    expect(loadOlderButton).toBeDisabled();
   });
 
-  it("resets pagination back to the first page when filters change", async () => {
+  it("resets loaded history back to the newest page when filters change", async () => {
     render(<HistoryPage />);
     await screen.findAllByRole("link", { name: /view details/i });
 
-    fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    await waitFor(() => expect(screen.getByText("Page 2")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /load older/i }));
+    await waitFor(() => expect(screen.getByText("exec-11")).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "failed" } });
 
     await waitFor(() => expect(getLastExecutionUrl()).toContain("offset=0"));
-    expect(screen.getByText("Page 1")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("exec-11")).toBeNull());
+    expect(screen.getByText("exec-1")).toBeInTheDocument();
   });
 
   it("renders an error state when execution history cannot be loaded", async () => {

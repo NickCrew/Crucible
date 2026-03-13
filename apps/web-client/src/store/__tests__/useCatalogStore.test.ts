@@ -35,10 +35,112 @@ describe('useCatalogStore', () => {
       expect(state.scenarios).toEqual([]);
       expect(state.executions).toEqual([]);
       expect(state.activeExecution).toBeNull();
+      expect(state.historyExecutions).toEqual([]);
+      expect(state.historyOffset).toBe(0);
+      expect(state.historyHasNextPage).toBe(false);
+      expect(state.historyInitialized).toBe(false);
       expect(state.metricsHistory).toEqual([]);
       expect(state.isLoading).toBe(false);
       expect(state.error).toBeNull();
       expect(state.wsConnected).toBe(false);
+    });
+  });
+
+  describe('execution history pagination', () => {
+    it('fetches the newest execution history page into the dedicated history slice', async () => {
+      const executions = [
+        { id: 'exec-1', scenarioId: 'a', mode: 'assessment', status: 'completed', steps: [] },
+        { id: 'exec-2', scenarioId: 'b', mode: 'assessment', status: 'failed', steps: [] },
+      ];
+      mockFetch.mockResolvedValueOnce(mockJsonResponse(200, executions));
+
+      await useCatalogStore.getState().fetchExecutionHistory({ reset: true });
+
+      const state = useCatalogStore.getState();
+      expect(state.historyExecutions).toEqual(executions);
+      expect(state.historyOffset).toBe(2);
+      expect(state.historyInitialized).toBe(true);
+      expect(state.historyHasNextPage).toBe(false);
+      expect(state.executions).toEqual([]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/executions?limit=10&offset=0'),
+      );
+    });
+
+    it('loads older execution history on demand without polluting the live executions slice', async () => {
+      mockFetch
+        .mockResolvedValueOnce(mockJsonResponse(200, [
+          { id: 'exec-1', scenarioId: 'a', mode: 'assessment', status: 'completed', steps: [] },
+          { id: 'exec-2', scenarioId: 'b', mode: 'assessment', status: 'failed', steps: [] },
+          { id: 'exec-3', scenarioId: 'c', mode: 'assessment', status: 'completed', steps: [] },
+          { id: 'exec-4', scenarioId: 'd', mode: 'assessment', status: 'failed', steps: [] },
+          { id: 'exec-5', scenarioId: 'e', mode: 'assessment', status: 'completed', steps: [] },
+          { id: 'exec-6', scenarioId: 'f', mode: 'assessment', status: 'failed', steps: [] },
+          { id: 'exec-7', scenarioId: 'g', mode: 'assessment', status: 'completed', steps: [] },
+          { id: 'exec-8', scenarioId: 'h', mode: 'assessment', status: 'failed', steps: [] },
+          { id: 'exec-9', scenarioId: 'i', mode: 'assessment', status: 'completed', steps: [] },
+          { id: 'exec-10', scenarioId: 'j', mode: 'assessment', status: 'failed', steps: [] },
+        ]))
+        .mockResolvedValueOnce(mockJsonResponse(200, [
+          { id: 'exec-11', scenarioId: 'k', mode: 'assessment', status: 'completed', steps: [] },
+        ]));
+
+      await useCatalogStore.getState().fetchExecutionHistory({ reset: true });
+      await useCatalogStore.getState().loadOlderExecutionHistory();
+
+      const state = useCatalogStore.getState();
+      expect(state.historyExecutions.map((execution) => execution.id)).toEqual([
+        'exec-1',
+        'exec-2',
+        'exec-3',
+        'exec-4',
+        'exec-5',
+        'exec-6',
+        'exec-7',
+        'exec-8',
+        'exec-9',
+        'exec-10',
+        'exec-11',
+      ]);
+      expect(state.historyOffset).toBe(11);
+      expect(state.historyHasNextPage).toBe(false);
+      expect(state.executions).toEqual([]);
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('/executions?limit=10&offset=10'),
+      );
+    });
+
+    it('ignores stale history responses when filters change quickly', async () => {
+      let resolveFirstRequest: (value: unknown) => void;
+      let resolveSecondRequest: (value: unknown) => void;
+
+      mockFetch
+        .mockReturnValueOnce(new Promise((resolve) => {
+          resolveFirstRequest = resolve;
+        }))
+        .mockReturnValueOnce(new Promise((resolve) => {
+          resolveSecondRequest = resolve;
+        }));
+
+      const firstRequest = useCatalogStore.getState().fetchExecutionHistory({ reset: true });
+      const secondRequest = useCatalogStore.getState().updateHistoryFilters({ status: 'failed' });
+
+      resolveSecondRequest!(mockJsonResponse(200, [
+        { id: 'exec-new', scenarioId: 'fresh', mode: 'assessment', status: 'failed', steps: [] },
+      ]));
+      await secondRequest;
+
+      resolveFirstRequest!(mockJsonResponse(200, [
+        { id: 'exec-stale', scenarioId: 'stale', mode: 'assessment', status: 'completed', steps: [] },
+      ]));
+      await firstRequest;
+
+      const state = useCatalogStore.getState();
+      expect(state.historyExecutions).toEqual([
+        expect.objectContaining({ id: 'exec-new', status: 'failed' }),
+      ]);
+      expect(state.historyFilters.status).toBe('failed');
     });
   });
 
