@@ -50,6 +50,14 @@ interface OutboundAllowlist {
   ipBlockList: BlockList;
 }
 
+export interface ScenarioEngineOptions {
+  targetUrl?: string;
+  maxConcurrency?: number;
+  stepBodyRetention?: StepBodyRetentionPolicy;
+  stepBodyMaxBytes?: number;
+  outboundAllowlist?: string;
+}
+
 // ── Constants ────────────────────────────────────────────────────────
 
 const DEFAULT_TARGET_URL = 'http://localhost:8880';
@@ -79,26 +87,34 @@ export class ScenarioEngine extends EventEmitter {
   private stepBodyMaxBytes: number;
   private outboundAllowlist: OutboundAllowlist;
 
-  constructor(catalog: CatalogService, repo?: ExecutionRepository, reportService?: ReportService) {
+  constructor(
+    catalog: CatalogService,
+    repo?: ExecutionRepository,
+    reportService?: ReportService,
+    options: ScenarioEngineOptions = {},
+  ) {
     super();
     this.catalog = catalog;
     this.repo = repo ?? null;
     this.reportService = reportService ?? null;
     this.executions = new Map();
     this.targetUrl = normalizeConfiguredTargetUrl(
-      process.env.CRUCIBLE_TARGET_URL ?? DEFAULT_TARGET_URL,
+      options.targetUrl ?? process.env.CRUCIBLE_TARGET_URL ?? DEFAULT_TARGET_URL,
     );
-    this.maxConcurrency = parseInt(
+    const configuredMaxConcurrency = parseInt(
       process.env.CRUCIBLE_MAX_CONCURRENCY ?? '',
       10,
     ) || DEFAULT_MAX_CONCURRENCY;
-    this.stepBodyRetention = parseStepBodyRetention(process.env.CRUCIBLE_STEP_BODY_RETENTION);
-    this.stepBodyMaxBytes = parsePositiveInteger(
-      process.env.CRUCIBLE_STEP_BODY_MAX_BYTES,
-      DEFAULT_STEP_BODY_MAX_BYTES,
-    );
+    this.maxConcurrency = options.maxConcurrency ?? configuredMaxConcurrency;
+    this.stepBodyRetention = options.stepBodyRetention
+      ?? parseStepBodyRetention(process.env.CRUCIBLE_STEP_BODY_RETENTION);
+    this.stepBodyMaxBytes = options.stepBodyMaxBytes
+      ?? parsePositiveInteger(
+        process.env.CRUCIBLE_STEP_BODY_MAX_BYTES,
+        DEFAULT_STEP_BODY_MAX_BYTES,
+      );
     this.outboundAllowlist = parseOutboundAllowlist(
-      process.env.CRUCIBLE_OUTBOUND_ALLOWLIST,
+      options.outboundAllowlist ?? process.env.CRUCIBLE_OUTBOUND_ALLOWLIST,
       this.targetUrl,
     );
   }

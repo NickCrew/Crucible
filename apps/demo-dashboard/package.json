@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "crucible": "./dist/cli.js"
+  },
   "scripts": {
+    "assess": "tsx src/cli.ts assess",
     "dev": "tsx watch src/server/index.ts",
     "build": "tsc",
     "type-check": "tsc --noEmit",

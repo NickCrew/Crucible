@@ -230,6 +230,34 @@ describe('ExecutionRepository', () => {
     expect(retrieved!.report).toEqual(report);
   });
 
+  it('round-trips targetUrl and stored step details', () => {
+    const details = {
+      response: {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: { ok: true },
+      },
+      retention: {
+        policy: 'all',
+        truncated: false,
+        contentType: 'application/json',
+        originalBytes: 12,
+        storedBytes: 12,
+        bodyFormat: 'json' as const,
+      },
+    };
+    const exec = makeExecution({
+      targetUrl: 'http://127.0.0.1:4545',
+      steps: [makeStep({ stepId: 'health', details })],
+    });
+
+    repo.insertExecution(exec);
+
+    const retrieved = repo.getExecution(exec.id);
+    expect(retrieved!.targetUrl).toBe('http://127.0.0.1:4545');
+    expect(retrieved!.steps[0].details).toEqual(details);
+  });
+
   it('round-trips pausedState', () => {
     const pausedState = {
       pendingStepIds: ['step-3', 'step-4'],

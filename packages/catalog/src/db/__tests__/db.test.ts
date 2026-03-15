@@ -43,6 +43,7 @@ describe('createDb', () => {
         context TEXT,
         paused_state TEXT,
         parent_execution_id TEXT,
+        target_url TEXT,
         report TEXT
       );
 
@@ -57,6 +58,7 @@ describe('createDb', () => {
         error TEXT,
         logs TEXT,
         result TEXT,
+        details TEXT,
         attempts INTEGER NOT NULL DEFAULT 0,
         assertions TEXT
       );

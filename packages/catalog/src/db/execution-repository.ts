@@ -120,6 +120,7 @@ export class ExecutionRepository {
         context TEXT,
         paused_state TEXT,
         parent_execution_id TEXT,
+        target_url TEXT,
         report TEXT
       )
     `);
@@ -135,6 +136,7 @@ export class ExecutionRepository {
         error TEXT,
         logs TEXT,
         result TEXT,
+        details TEXT,
         attempts INTEGER NOT NULL DEFAULT 0,
         assertions TEXT
       )
@@ -154,8 +156,39 @@ export class ExecutionRepository {
         throw error;
       }
     }
+    try {
+      this.db.run(sql`ALTER TABLE executions ADD COLUMN target_url TEXT`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const causeMessage =
+        error && typeof error === 'object' && 'cause' in error
+          ? String((error as { cause?: unknown }).cause ?? '')
+          : '';
+      if (
+        !message.includes('duplicate column name')
+        && !causeMessage.includes('duplicate column name')
+      ) {
+        throw error;
+      }
+    }
+    try {
+      this.db.run(sql`ALTER TABLE execution_steps ADD COLUMN details TEXT`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const causeMessage =
+        error && typeof error === 'object' && 'cause' in error
+          ? String((error as { cause?: unknown }).cause ?? '')
+          : '';
+      if (
+        !message.includes('duplicate column name')
+        && !causeMessage.includes('duplicate column name')
+      ) {
+        throw error;
+      }
+    }
     this.db.run(sql`CREATE INDEX IF NOT EXISTS idx_executions_scenario_started ON executions(scenario_id, started_at)`);
     this.db.run(sql`CREATE INDEX IF NOT EXISTS idx_executions_status_started ON executions(status, started_at)`);
+    this.db.run(sql`CREATE INDEX IF NOT EXISTS idx_executions_target_url ON executions(target_url)`);
     this.db.run(sql`CREATE INDEX IF NOT EXISTS idx_steps_execution_id ON execution_steps(execution_id)`);
   }
 
@@ -212,7 +245,7 @@ export class ExecutionRepository {
           duration: step.duration ?? null,
           error: step.error ?? null,
           logs: step.logs ?? null,
-          details: step.details ?? null,
+          details: coercePersistedStepDetails(step),
           attempts: step.attempts,
           assertions: step.assertions ?? null,
         }).run();
@@ -268,7 +301,7 @@ export class ExecutionRepository {
           duration: step.duration ?? null,
           error: step.error ?? null,
           logs: step.logs ?? null,
-          details: step.details ?? null,
+          details: coercePersistedStepDetails(step),
           attempts: step.attempts,
           assertions: step.assertions ?? null,
         })
@@ -377,7 +410,7 @@ export class ExecutionRepository {
       duration: step.duration ?? null,
       error: step.error ?? null,
       logs: step.logs ?? null,
-      details: step.details ?? null,
+      details: coercePersistedStepDetails(step),
       attempts: step.attempts,
       assertions: step.assertions ?? null,
     }).run();
@@ -421,4 +454,20 @@ export class ExecutionRepository {
 
     return exec;
   }
+}
+
+function coercePersistedStepDetails(step: ExecutionStepResult): ExecutionStepResult['details'] | null {
+  if (step.details) {
+    return step.details;
+  }
+
+  return isPersistedStepDetails(step.result) ? step.result : null;
+}
+
+function isPersistedStepDetails(value: unknown): value is ExecutionStepResult['details'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  return 'response' in value || 'retention' in value;
 }

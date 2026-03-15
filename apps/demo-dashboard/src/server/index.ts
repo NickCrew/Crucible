@@ -1,15 +1,14 @@
-import { existsSync, mkdirSync } from 'fs';
-import { join, basename, resolve } from 'path';
+import { existsSync } from 'fs';
+import { join, basename } from 'path';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import { config } from 'dotenv';
-import { CatalogService, createDb, ExecutionRepository } from '@crucible/catalog';
 import { setupWebSocket } from './websocket.js';
-import { ScenarioEngine } from './engine.js';
 import { ReportService } from './reports.js';
 import { TerminalService } from './terminal.js';
+import { createCrucibleRuntime } from './runtime.js';
 
 config();
 
@@ -21,24 +20,9 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
-
-// ── Database setup ───────────────────────────────────────────────────
-const dbPath = process.env.CRUCIBLE_DB_PATH || './data/crucible.db';
-mkdirSync(dbPath.replace(/\/[^/]+$/, ''), { recursive: true });
-const db = createDb(dbPath);
-const repo = new ExecutionRepository(db);
-repo.ensureTables();
-
-const reportsDir = resolve(process.env.CRUCIBLE_REPORTS_DIR || './data/reports');
-mkdirSync(reportsDir, { recursive: true });
-
-const reportService = new ReportService({ 
-  reportsDir, 
-  baseUrl: process.env.CRUCIBLE_BASE_URL || `http://localhost:${PORT}` 
+const { db, dbPath, reportsDir, catalog, repo, engine } = createCrucibleRuntime({
+  port: Number(PORT),
 });
-
-const catalog = new CatalogService();
-const engine = new ScenarioEngine(catalog, repo, reportService);
 const terminal = new TerminalService();
 
 // WebSocket setup
