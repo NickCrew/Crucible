@@ -5,6 +5,36 @@
   "difficulty": "Advanced",
   "description": "Sophisticated IDOR scenario testing for cross-tenant data isolation.",
   "rule_ids": ["CC6.1"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "fedramp",
+        "revision": "rev5",
+        "baseline": "moderate",
+        "controlId": "AC-3",
+        "family": "AC",
+        "evidenceTypes": [
+          "request-response",
+          "tenant-fixture"
+        ],
+        "assertion": "tenant-project-access-is-enforced",
+        "rationale": "Cross-tenant project access attempts exercise FedRAMP access enforcement evidence without changing the technical IDOR scenario category.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "GET",
+          "path": "/api/v1/saas/tenants/{tenant_id}/projects",
+          "fedrampAssertion": "tenant-project-access-is-enforced"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "tenant-b-resource-access-attempt",
+            "description": "Tenant A token attempts access to Tenant B projects."
+          }
+        ]
+      }
+    ]
+  },
   "steps": [
     {
       "id": "tenant-a-resource-access",

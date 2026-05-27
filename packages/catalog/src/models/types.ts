@@ -2,8 +2,12 @@ import { z } from 'zod';
 
 // ── HTTP Request ────────────────────────────────────────────────────
 
+export const HttpMethodSchema = z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+
+export type HttpMethod = z.infer<typeof HttpMethodSchema>;
+
 export const RequestSchema = z.object({
-  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']),
+  method: HttpMethodSchema,
   url: z.string(),
   headers: z.record(z.string()).optional(),
   body: z.union([z.string(), z.record(z.unknown()), z.array(z.unknown())]).optional(),
@@ -134,6 +138,153 @@ export const ScenarioTargetCompatibilitySchema = z.enum([
 ]);
 
 export type ScenarioTargetCompatibility = z.infer<typeof ScenarioTargetCompatibilitySchema>;
+
+// ── Compliance Metadata ─────────────────────────────────────────────
+
+export const ComplianceFrameworkSchema = z.enum(['fedramp']);
+
+export type ComplianceFramework = z.infer<typeof ComplianceFrameworkSchema>;
+
+export const FedRampComplianceFrameworkSchema = z.literal('fedramp');
+
+export const FedRampRevisionSchema = z.enum(['rev5']);
+
+export type FedRampRevision = z.infer<typeof FedRampRevisionSchema>;
+
+export const FedRampBaselineSchema = z.enum(['low', 'moderate', 'high', 'li-saas']);
+
+export type FedRampBaseline = z.infer<typeof FedRampBaselineSchema>;
+
+export const FedRampControlFamilySchema = z.enum([
+  'AC',
+  'AT',
+  'AU',
+  'CA',
+  'CM',
+  'CP',
+  'IA',
+  'IR',
+  'MA',
+  'MP',
+  'PE',
+  'PL',
+  'PM',
+  'PS',
+  'PT',
+  'RA',
+  'SA',
+  'SC',
+  'SI',
+  'SR',
+]);
+
+export type FedRampControlFamily = z.infer<typeof FedRampControlFamilySchema>;
+
+export const FedRampEvidenceTypeSchema = z.enum([
+  'request-response',
+  'audit-log',
+  'auth-token',
+  'session-cookie',
+  'tenant-fixture',
+  'seeded-resource',
+  'config-state',
+  'runner-artifact',
+  'tls-handshake',
+  'openapi-operation',
+]);
+
+export type FedRampEvidenceType = z.infer<typeof FedRampEvidenceTypeSchema>;
+
+export const ComplianceImplementationStatusSchema = z.enum([
+  'planned',
+  'partial',
+  'implemented',
+  'manual',
+  'deferred',
+]);
+
+export type ComplianceImplementationStatus = z.infer<typeof ComplianceImplementationStatusSchema>;
+
+export const FedRampControlIdSchema = z
+  .string()
+  .regex(
+    /^[A-Z]{2}-\d+(?:[a-z]|\(\d+\)|\([a-z]\))*$/,
+    'FedRAMP control ID must look like AC-3, AU-9(4), AC-2a, or AC-2(1)(a)',
+  );
+
+export type FedRampControlId = z.infer<typeof FedRampControlIdSchema>;
+
+export const ComplianceEvidenceMappingSchema = z
+  .object({
+    type: FedRampEvidenceTypeSchema,
+    stepId: z.string().min(1).optional(),
+    description: z.string().min(1).optional(),
+  })
+  .refine((mapping) => Boolean(mapping.stepId || mapping.description), {
+    message: 'Evidence mapping must include either a stepId or a description',
+  });
+
+export type ComplianceEvidenceMapping = z.infer<typeof ComplianceEvidenceMappingSchema>;
+
+export const FedRampEndpointReferenceSchema = z.object({
+  method: HttpMethodSchema,
+  path: z.string().min(1),
+  fedrampAssertion: z.string().min(1).optional(),
+});
+
+export type FedRampEndpointReference = z.infer<typeof FedRampEndpointReferenceSchema>;
+
+const FedRampComplianceMappingBaseSchema = z
+  .object({
+    framework: FedRampComplianceFrameworkSchema,
+    revision: FedRampRevisionSchema,
+    baseline: FedRampBaselineSchema,
+    controlId: FedRampControlIdSchema,
+    family: FedRampControlFamilySchema,
+    evidenceTypes: z.array(FedRampEvidenceTypeSchema).min(1),
+    assertion: z.string().min(1),
+    rationale: z.string().min(1),
+    implementationStatus: ComplianceImplementationStatusSchema,
+    endpoint: FedRampEndpointReferenceSchema.optional(),
+    evidence: z.array(ComplianceEvidenceMappingSchema).optional(),
+  })
+  .strict();
+
+function validateFedRampControlFamily(
+  mapping: z.infer<typeof FedRampComplianceMappingBaseSchema>,
+  ctx: z.RefinementCtx,
+) {
+  const [controlFamily] = mapping.controlId.split('-');
+  if (mapping.family !== controlFamily) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['family'],
+      message: `FedRAMP control family "${mapping.family}" must match control ID "${mapping.controlId}"`,
+    });
+  }
+}
+
+export const FedRampComplianceMappingSchema = FedRampComplianceMappingBaseSchema.superRefine(
+  validateFedRampControlFamily,
+);
+
+export type FedRampComplianceMapping = z.infer<typeof FedRampComplianceMappingSchema>;
+
+export const ComplianceMappingSchema = z
+  .discriminatedUnion('framework', [FedRampComplianceMappingBaseSchema])
+  .superRefine((mapping, ctx) => {
+    if (mapping.framework === 'fedramp') {
+      validateFedRampControlFamily(mapping, ctx);
+    }
+  });
+
+export type ComplianceMapping = z.infer<typeof ComplianceMappingSchema>;
+
+export const ScenarioComplianceSchema = z.object({
+  mappings: z.array(ComplianceMappingSchema).min(1),
+});
+
+export type ScenarioCompliance = z.infer<typeof ScenarioComplianceSchema>;
 
 // ── Scenario Step ───────────────────────────────────────────────────
 
@@ -278,6 +429,7 @@ export const ScenarioSchema = z
     version: z.number().optional(),
     tags: z.array(z.string()).optional(),
     rule_ids: z.array(z.string()).optional(),
+    compliance: ScenarioComplianceSchema.optional(),
 
     // Fields that exist in JSON files — previously stripped by Zod
     target: z.string().optional(),
@@ -287,6 +439,54 @@ export const ScenarioSchema = z
   .passthrough();
 
 export type Scenario = z.infer<typeof ScenarioSchema>;
+
+export interface FedRampScenarioComplianceFilter {
+  framework?: 'fedramp';
+  baseline?: FedRampBaseline;
+  family?: FedRampControlFamily;
+  controlId?: FedRampControlId;
+}
+
+export type ScenarioComplianceFilter = FedRampScenarioComplianceFilter;
+
+export function scenarioHasComplianceMapping(
+  scenario: Pick<Scenario, 'compliance'>,
+  filter: ScenarioComplianceFilter,
+): boolean {
+  const mappings = scenario.compliance?.mappings ?? [];
+
+  return mappings.some((mapping) => {
+    if (filter.framework && mapping.framework !== filter.framework) {
+      return false;
+    }
+
+    if (mapping.framework === 'fedramp') {
+      if (filter.baseline && mapping.baseline !== filter.baseline) {
+        return false;
+      }
+      if (filter.family && mapping.family !== filter.family) {
+        return false;
+      }
+      if (filter.controlId && mapping.controlId !== filter.controlId) {
+        return false;
+      }
+      return true;
+    }
+
+    if (filter.baseline || filter.family || filter.controlId) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+export function filterScenariosByCompliance<T extends Pick<Scenario, 'compliance'>>(
+  scenarios: readonly T[],
+  filter: ScenarioComplianceFilter,
+): T[] {
+  return scenarios.filter((scenario) => scenarioHasComplianceMapping(scenario, filter));
+}
 
 function normalizeScenarioHints(values: readonly string[] | undefined): string[] {
   return (values ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean);

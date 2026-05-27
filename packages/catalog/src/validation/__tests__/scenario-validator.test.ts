@@ -196,4 +196,82 @@ describe('validateScenario', () => {
       expect(result.errors.some((e: string) => e.includes('invalid-rule-id'))).toBe(true);
     });
   });
+
+  describe('FedRAMP compliance validation', () => {
+    const fedrampMapping = {
+      framework: 'fedramp',
+      revision: 'rev5',
+      baseline: 'moderate',
+      controlId: 'AC-3',
+      family: 'AC',
+      evidenceTypes: ['request-response'],
+      assertion: 'tenant-access-is-enforced',
+      rationale: 'Cross-tenant access should be denied and audited.',
+      implementationStatus: 'implemented',
+      evidence: [{ type: 'request-response', stepId: 'tenant-b-access' }],
+    };
+
+    it('returns valid when evidence mappings reference existing steps', () => {
+      const result = validateScenario(
+        scenario({
+          steps: [step({ id: 'tenant-b-access' })],
+          compliance: { mappings: [fedrampMapping] },
+        }),
+      );
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('errors when evidence mappings reference missing steps', () => {
+      const result = validateScenario(
+        scenario({
+          compliance: { mappings: [fedrampMapping] },
+        }),
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e: string) => e.includes('tenant-b-access'))).toBe(true);
+    });
+
+    it('aggregates missing evidence step errors across compliance mappings', () => {
+      const result = validateScenario(
+        scenario({
+          compliance: {
+            mappings: [
+              {
+                ...fedrampMapping,
+                evidence: [{ type: 'request-response', stepId: 'missing-one' }],
+              },
+              {
+                ...fedrampMapping,
+                controlId: 'SC-13',
+                family: 'SC',
+                evidenceTypes: ['tls-handshake'],
+                assertion: 'reject-non-fips-cipher',
+                evidence: [{ type: 'tls-handshake', stepId: 'missing-two' }],
+              },
+            ],
+          },
+        }),
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.filter((e: string) => e.includes('compliance mapping')).length).toBeGreaterThanOrEqual(2);
+      expect(result.errors.some((e: string) => e.includes('missing-one'))).toBe(true);
+      expect(result.errors.some((e: string) => e.includes('missing-two'))).toBe(true);
+    });
+
+    it('returns valid when compliance mappings omit optional evidence details', () => {
+      const { evidence: _evidence, ...mappingWithoutEvidence } = fedrampMapping;
+      const result = validateScenario(
+        scenario({
+          compliance: { mappings: [mappingWithoutEvidence] },
+        }),
+      );
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+  });
 });

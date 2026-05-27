@@ -35,6 +35,18 @@ export function validateScenario(scenario: Scenario): ValidationResult {
     }
   }
 
+  if (scenario.compliance) {
+    for (const [index, mapping] of scenario.compliance.mappings.entries()) {
+      for (const evidence of mapping.evidence ?? []) {
+        if (evidence.stepId && !stepIds.has(evidence.stepId)) {
+          errors.push(
+            `Scenario "${scenario.id}" compliance mapping ${index} references unknown evidence step "${evidence.stepId}"`,
+          );
+        }
+      }
+    }
+  }
+
   // ── Missing reference detection ───────────────────────────────────
 
   for (const step of scenario.steps) {

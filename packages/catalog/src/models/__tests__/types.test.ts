@@ -1,5 +1,6 @@
 import {
   RequestSchema,
+  HttpMethodSchema,
   ExecutionConfigSchema,
   ExpectSchema,
   ExtractRuleSchema,
@@ -17,6 +18,10 @@ import {
   countSimulationOverridableBlockingExpectations,
   normalizeScenarioTargetUrl,
   ScenarioTargetUrlError,
+  ComplianceMappingSchema,
+  ScenarioComplianceSchema,
+  scenarioHasComplianceMapping,
+  filterScenariosByCompliance,
 } from '../types.js';
 
 function minimalStep(overrides: Record<string, unknown> = {}) {
@@ -100,9 +105,296 @@ describe('ScenarioSchema', () => {
       expect(result.data).toHaveProperty('phases');
     }
   });
+
+  it('accepts FedRAMP compliance metadata without replacing category or rule_ids', () => {
+    const result = ScenarioSchema.safeParse(
+      minimalScenario({
+        category: 'Compliance',
+        rule_ids: ['164.312-e-1'],
+        compliance: {
+          mappings: [
+            {
+              framework: 'fedramp',
+              revision: 'rev5',
+              baseline: 'moderate',
+              controlId: 'SC-13',
+              family: 'SC',
+              evidenceTypes: ['tls-handshake', 'request-response'],
+              assertion: 'reject-non-fips-cipher',
+              rationale: 'Weak cipher negotiation probes collect evidence for cryptographic protection controls.',
+              implementationStatus: 'implemented',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.category).toBe('Compliance');
+      expect(result.data.rule_ids).toEqual(['164.312-e-1']);
+      expect(result.data.compliance?.mappings[0].controlId).toBe('SC-13');
+    }
+  });
+});
+
+describe('ComplianceMappingSchema', () => {
+  const mapping = {
+    framework: 'fedramp',
+    revision: 'rev5',
+    baseline: 'moderate',
+    controlId: 'AC-3',
+    family: 'AC',
+    evidenceTypes: ['request-response'],
+    assertion: 'tenant-access-is-enforced',
+    rationale: 'Cross-tenant access attempts should be denied and auditable.',
+    implementationStatus: 'implemented',
+  };
+
+  it('accepts valid FedRAMP metadata', () => {
+    expect(ComplianceMappingSchema.safeParse(mapping).success).toBe(true);
+  });
+
+  it('rejects unsupported FedRAMP baselines', () => {
+    expect(
+      ComplianceMappingSchema.safeParse({ ...mapping, baseline: 'impact-level-5' }).success,
+    ).toBe(false);
+  });
+
+  it('rejects malformed FedRAMP control IDs', () => {
+    expect(ComplianceMappingSchema.safeParse({ ...mapping, controlId: 'AC3' }).success).toBe(false);
+    expect(ComplianceMappingSchema.safeParse({ ...mapping, controlId: 'ac-3' }).success).toBe(false);
+  });
+
+  it('accepts FedRAMP control sub-items when the family still matches', () => {
+    expect(ComplianceMappingSchema.safeParse({ ...mapping, controlId: 'AC-2a' }).success).toBe(true);
+    expect(ComplianceMappingSchema.safeParse({ ...mapping, controlId: 'AC-2(1)(a)' }).success).toBe(true);
+  });
+
+  it('rejects mismatched control families', () => {
+    expect(
+      ComplianceMappingSchema.safeParse({ ...mapping, controlId: 'AC-3', family: 'AU' }).success,
+    ).toBe(false);
+  });
+
+  it('requires at least one evidence type', () => {
+    expect(ComplianceMappingSchema.safeParse({ ...mapping, evidenceTypes: [] }).success).toBe(false);
+  });
+
+  it('accepts endpoint and per-step evidence mappings', () => {
+    const result = ScenarioComplianceSchema.safeParse({
+      mappings: [
+        {
+          ...mapping,
+          endpoint: {
+            method: 'GET',
+            path: '/api/v1/saas/tenants/{tenant_id}/projects',
+            fedrampAssertion: 'tenant-project-access-is-enforced',
+          },
+          evidence: [
+            {
+              type: 'request-response',
+              stepId: 'tenant-b-resource-access-attempt',
+              description: 'Denied cross-tenant request response.',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid endpoint references', () => {
+    expect(
+      ScenarioComplianceSchema.safeParse({
+        mappings: [
+          {
+            ...mapping,
+            endpoint: {
+              method: 'TRACE',
+              path: '/api/v1/saas/tenants/{tenant_id}/projects',
+            },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+
+    expect(
+      ScenarioComplianceSchema.safeParse({
+        mappings: [
+          {
+            ...mapping,
+            endpoint: {
+              method: 'GET',
+              path: '',
+            },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects evidence mappings that have no step or description context', () => {
+    expect(
+      ScenarioComplianceSchema.safeParse({
+        mappings: [
+          {
+            ...mapping,
+            evidence: [{ type: 'request-response' }],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects empty step IDs in evidence mappings', () => {
+    expect(
+      ScenarioComplianceSchema.safeParse({
+        mappings: [
+          {
+            ...mapping,
+            evidence: [{ type: 'request-response', stepId: '', description: 'Bad empty step reference.' }],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects empty descriptions in evidence mappings', () => {
+    expect(
+      ScenarioComplianceSchema.safeParse({
+        mappings: [
+          {
+            ...mapping,
+            evidence: [{ type: 'request-response', description: '' }],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('Scenario compliance helpers', () => {
+  const scenarios = [
+    minimalScenario({
+      id: 'fedramp-ac',
+      compliance: {
+        mappings: [
+          {
+            framework: 'fedramp',
+            revision: 'rev5',
+            baseline: 'moderate',
+            controlId: 'AC-3',
+            family: 'AC',
+            evidenceTypes: ['request-response'],
+            assertion: 'tenant-access-is-enforced',
+            rationale: 'Cross-tenant access should be denied.',
+            implementationStatus: 'implemented',
+          },
+        ],
+      },
+    }),
+    minimalScenario({
+      id: 'fedramp-sc',
+      compliance: {
+        mappings: [
+          {
+            framework: 'fedramp',
+            revision: 'rev5',
+            baseline: 'high',
+            controlId: 'SC-13',
+            family: 'SC',
+            evidenceTypes: ['tls-handshake'],
+            assertion: 'reject-non-fips-cipher',
+            rationale: 'Weak TLS ciphers should be rejected.',
+            implementationStatus: 'implemented',
+          },
+        ],
+      },
+    }),
+    minimalScenario({ id: 'no-compliance' }),
+  ];
+
+  it('detects matching scenario compliance metadata', () => {
+    expect(scenarioHasComplianceMapping(scenarios[0], {})).toBe(true);
+    expect(scenarioHasComplianceMapping(scenarios[0], { framework: 'fedramp' })).toBe(true);
+    expect(scenarioHasComplianceMapping(scenarios[0], { family: 'SC' })).toBe(false);
+  });
+
+  it('does not match framework-specific filters against future generic mappings', () => {
+    const futureScenario = {
+      compliance: {
+        mappings: [{ framework: 'soc2' }],
+      },
+    } as any;
+
+    expect(scenarioHasComplianceMapping(futureScenario, {})).toBe(true);
+    expect(scenarioHasComplianceMapping(futureScenario, { framework: 'fedramp' })).toBe(false);
+    expect(scenarioHasComplianceMapping(futureScenario, { baseline: 'high' })).toBe(false);
+  });
+
+  it('matches later compliance mappings in the same scenario', () => {
+    const multiMappingScenario = minimalScenario({
+      compliance: {
+        mappings: [
+          {
+            framework: 'fedramp',
+            revision: 'rev5',
+            baseline: 'moderate',
+            controlId: 'AC-3',
+            family: 'AC',
+            evidenceTypes: ['request-response'],
+            assertion: 'tenant-access-is-enforced',
+            rationale: 'Cross-tenant access should be denied.',
+            implementationStatus: 'implemented',
+          },
+          {
+            framework: 'fedramp',
+            revision: 'rev5',
+            baseline: 'high',
+            controlId: 'SC-13',
+            family: 'SC',
+            evidenceTypes: ['tls-handshake'],
+            assertion: 'reject-non-fips-cipher',
+            rationale: 'Weak TLS ciphers should be rejected.',
+            implementationStatus: 'implemented',
+          },
+        ],
+      },
+    });
+
+    expect(scenarioHasComplianceMapping(multiMappingScenario, { controlId: 'SC-13' })).toBe(true);
+  });
+
+  it('filters by framework, baseline, family, and control ID', () => {
+    expect(filterScenariosByCompliance(scenarios, { framework: 'fedramp' }).map((s) => s.id)).toEqual([
+      'fedramp-ac',
+      'fedramp-sc',
+    ]);
+    expect(filterScenariosByCompliance(scenarios, { baseline: 'moderate' }).map((s) => s.id)).toEqual([
+      'fedramp-ac',
+    ]);
+    expect(filterScenariosByCompliance(scenarios, { family: 'SC' }).map((s) => s.id)).toEqual([
+      'fedramp-sc',
+    ]);
+    expect(filterScenariosByCompliance(scenarios, { controlId: 'AC-3' }).map((s) => s.id)).toEqual([
+      'fedramp-ac',
+    ]);
+  });
+
+  it('returns an empty result when no compliance metadata matches', () => {
+    expect(filterScenariosByCompliance(scenarios, { baseline: 'li-saas' })).toEqual([]);
+    expect(filterScenariosByCompliance(scenarios, { controlId: 'RA-5' })).toEqual([]);
+  });
 });
 
 describe('RequestSchema', () => {
+  it('shares HTTP method validation for request and endpoint metadata', () => {
+    expect(HttpMethodSchema.safeParse('GET').success).toBe(true);
+    expect(HttpMethodSchema.safeParse('TRACE').success).toBe(false);
+  });
+
   it('rejects invalid HTTP method', () => {
     expect(RequestSchema.safeParse({ method: 'TRACE', url: '/' }).success).toBe(false);
   });

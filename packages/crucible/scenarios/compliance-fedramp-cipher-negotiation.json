@@ -5,6 +5,36 @@
   "difficulty": "Advanced",
   "description": "Attempts to negotiate weak or non-FIPS compliant TLS ciphers.",
   "rule_ids": ["164.312-e-1"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "fedramp",
+        "revision": "rev5",
+        "baseline": "moderate",
+        "controlId": "SC-13",
+        "family": "SC",
+        "evidenceTypes": [
+          "tls-handshake",
+          "request-response"
+        ],
+        "assertion": "reject-non-fips-cipher",
+        "rationale": "Weak cipher negotiation probes collect endpoint evidence for FedRAMP cryptographic protection controls.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "HEAD",
+          "path": "/api/v1/health",
+          "fedrampAssertion": "reject-non-fips-cipher"
+        },
+        "evidence": [
+          {
+            "type": "tls-handshake",
+            "stepId": "weak-cipher-probe",
+            "description": "Weak cipher negotiation request and blocking result."
+          }
+        ]
+      }
+    ]
+  },
   "steps": [
     {
       "id": "weak-cipher-probe",
