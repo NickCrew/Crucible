@@ -15,3 +15,5 @@ architecture:
 development:
   - title: Testing Guide
     url: /development/testing/testing-guide
+  - title: Chimera FedRAMP Contract
+    url: /development/contracts/chimera-fedramp-openapi-extensions

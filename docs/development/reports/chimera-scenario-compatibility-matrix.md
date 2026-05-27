@@ -6,6 +6,7 @@ Generated on 2026-03-11 for backlog task TASK-28. This matrix audits the live Cr
 
 - `packages/catalog/scenarios/` — 129 scenario JSON files in Crucible.
 - `../Chimera/apps/vuln-api/docs/openapi.yaml` — 527 current Chimera path entries.
+- `docs/development/contracts/chimera-fedramp-openapi-extensions.md` — Crucible's consumer contract for Chimera FedRAMP OpenAPI annotations.
 - `../Chimera/docs/endpoints-catalog.md` — planning catalog that still describes a smaller 240+ endpoint subset.
 - `../Chimera/docs/vulnerability-inventory.md` — vulnerability inventory describing 114+ vulnerable endpoints and 200+ flaws.
 
@@ -16,6 +17,29 @@ Generated on 2026-03-11 for backlog task TASK-28. This matrix audits the live Cr
 - `no-match`: the scenario targets another app family entirely, depends on non-HTTP recon/static assets, or has no direct Chimera route evidence in the current OpenAPI spec.
 - Coverage counts are `matched-or-rewritten URLs / total unique scenario URLs`. Query-string-only differences are ignored because Crucible resolves them at runtime against the same route.
 - High-confidence family splits come from scenario metadata, not a central registry. In particular, `chimera-*` plus most `api-demo-*` files self-identify as Chimera-oriented, while `crapi-*`, `vampi-*`, `vp-demo-*`, and the OWASP sample scenarios point at other target labs.
+
+## FedRAMP Control-Mapping Drift Checks
+
+FedRAMP compatibility should be evaluated as a second pass over route compatibility. A scenario can match a Chimera route and still have stale compliance metadata.
+
+When Chimera OpenAPI operations include the FedRAMP extensions defined in `docs/development/contracts/chimera-fedramp-openapi-extensions.md`, the compatibility workflow should also verify:
+
+- every scenario endpoint reference with `framework: fedramp` resolves to an OpenAPI method/path operation;
+- the matched operation has `x-fedramp-controls`, `x-vulnerability-class`, `x-expected-defense`, and `x-evidence-types`;
+- the scenario's selected `controlId` appears in the matched operation's `x-fedramp-controls[].controlId` values;
+- the scenario's selected assertion slug appears in the matched operation's `x-fedramp-controls[].assertion` values;
+- the operation control `family` matches the `controlId` prefix, such as `AC` for `AC-3`;
+- `x-evidence-types` includes each evidence type the scenario expects to collect from Chimera;
+- route drift and control-map drift are reported separately so endpoint rewrites do not hide missing or stale FedRAMP mappings.
+
+Suggested additional status labels for future generated matrices:
+
+| Status | Meaning |
+| --- | --- |
+| `control-compatible` | Scenario route, selected assertion, selected control, and expected evidence types all match the OpenAPI operation annotation. |
+| `missing-fedramp-annotation` | Route matches, but the OpenAPI operation does not expose the required FedRAMP extensions. |
+| `stale-control-map` | Route matches, but the scenario references a control ID, assertion, or evidence type that is absent from the operation annotation. |
+| `route-and-control-drift` | The scenario has both route mismatch and FedRAMP metadata mismatch. |
 
 ## Summary
 
@@ -171,5 +195,7 @@ Generated on 2026-03-11 for backlog task TASK-28. This matrix audits the live Cr
 ## Recommended Follow-up
 
 - Prioritize the `chimera-first` scenarios marked `needs-update`; they are the fastest wins because they already target current Chimera domains but have route drift.
+- For FedRAMP scenario work, prioritize routes in the seed endpoint-control map before expanding broader Chimera coverage.
+- Add a generated control-map drift section after Chimera OpenAPI annotations land so compliance metadata can be audited independently of path compatibility.
 - Treat `external-crapi`, `external-vampi`, `external-vp-demo`, and `external-threatx-demo` rows marked `no-match` as candidates for replacement scenarios instead of path-only rewrites.
 - If TASK-29 expands Chimera-native coverage further, re-run this audit against the updated `openapi.yaml` before editing scenario JSON files.
