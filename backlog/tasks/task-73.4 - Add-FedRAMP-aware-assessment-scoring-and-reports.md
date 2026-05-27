@@ -4,6 +4,7 @@ title: Add FedRAMP-aware assessment scoring and reports
 status: To Do
 assignee: []
 created_date: '2026-05-27 15:37'
+updated_date: '2026-05-27 15:46'
 labels:
   - feature
   - fedramp
@@ -11,7 +12,6 @@ labels:
   - reporting
 milestone: m-10
 dependencies:
-  - TASK-73.1
   - TASK-73.3
 documentation:
   - backlog/docs/doc-2 - FedRAMP-Support-Plan-for-Crucible-and-Chimera.md

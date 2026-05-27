@@ -4,6 +4,7 @@ title: '[Chimera] Fill FedRAMP-relevant endpoint behavior gaps'
 status: To Do
 assignee: []
 created_date: '2026-05-27 15:38'
+updated_date: '2026-05-27 15:46'
 labels:
   - feature
   - fedramp
@@ -15,6 +16,7 @@ milestone: m-3
 dependencies:
   - TASK-73.7
   - TASK-73.8
+  - TASK-73.10
 references:
   - ../Chimera/apps/vuln-api/app/blueprints/admin/routes.py
   - ../Chimera/apps/vuln-api/app/blueprints/security_ops/routes.py
