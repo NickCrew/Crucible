@@ -1,9 +1,11 @@
 ---
 id: TASK-73.5
 title: Add framework and control filters to scenario discovery
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@myself'
 created_date: '2026-05-27 15:37'
+updated_date: '2026-05-28 16:37'
 labels:
   - feature
   - fedramp
@@ -32,10 +34,10 @@ Let operators find and launch FedRAMP-relevant scenarios from the CLI, API/clien
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Scenario listing supports filtering by framework, baseline, control family, and control ID.
-- [ ] #2 CLI scenarios output can list FedRAMP control mappings for matching scenarios.
-- [ ] #3 Web catalog filters expose FedRAMP mappings without replacing the existing technical category filter.
-- [ ] #4 Tests cover filtering behavior in catalog service, client/CLI, and web catalog state.
+- [x] #1 Scenario listing supports filtering by framework, baseline, control family, and control ID.
+- [x] #2 CLI scenarios output can list FedRAMP control mappings for matching scenarios.
+- [x] #3 Web catalog filters expose FedRAMP mappings without replacing the existing technical category filter.
+- [x] #4 Tests cover filtering behavior in catalog service, client/CLI, and web catalog state.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -46,3 +48,15 @@ Let operators find and launch FedRAMP-relevant scenarios from the CLI, API/clien
 3. Ensure filters compose with existing search/category/status behavior.
 4. Add empty-state messaging that distinguishes no matching scenarios from missing FedRAMP metadata.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added compliance filters across catalog service, API query parsing, SDK scenario listing, CLI scenarios output, and web catalog controls while preserving technical category filtering.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Operators can now discover FedRAMP scenarios by framework, baseline, family, and control ID from API/client, CLI, and web catalog surfaces.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -1,9 +1,11 @@
 ---
 id: TASK-73.6
 title: Add FedRAMP evidence export with OSCAL-shaped JSON
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@myself'
 created_date: '2026-05-27 15:37'
+updated_date: '2026-05-28 16:37'
 labels:
   - feature
   - fedramp
@@ -32,10 +34,10 @@ Produce a machine-readable FedRAMP evidence package from Crucible assessments, w
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 JSON export includes framework/control mappings, control rollups, scenario assertion outcomes, and evidence references.
-- [ ] #2 An OSCAL-shaped export mode is available behind a clearly named option or export type.
-- [ ] #3 Export documentation states scope and limitations relative to official FedRAMP authorization artifacts.
-- [ ] #4 Tests verify export shape stability for FedRAMP-mapped and unmapped scenarios.
+- [x] #1 JSON export includes framework/control mappings, control rollups, scenario assertion outcomes, and evidence references.
+- [x] #2 An OSCAL-shaped export mode is available behind a clearly named option or export type.
+- [x] #3 Export documentation states scope and limitations relative to official FedRAMP authorization artifacts.
+- [x] #4 Tests verify export shape stability for FedRAMP-mapped and unmapped scenarios.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -46,3 +48,15 @@ Produce a machine-readable FedRAMP evidence package from Crucible assessments, w
 3. Add an OSCAL-shaped JSON export mode that can evolve toward FedRAMP OSCAL assessment results.
 4. Document limitations clearly so users understand this is dynamic assessment evidence, not a full authorization package.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added OSCAL-shaped JSON report generation, report download route, SDK/CLI download helpers, scope limitations in docs, and stability tests for mapped/unmapped report exports.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+FedRAMP evidence can now be exported as a clearly scoped OSCAL-shaped JSON artifact.
+<!-- SECTION:FINAL_SUMMARY:END -->

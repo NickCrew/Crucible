@@ -1,10 +1,11 @@
 ---
 id: TASK-73.3
 title: Build initial Chimera FedRAMP scenario pack
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@myself'
 created_date: '2026-05-27 15:37'
-updated_date: '2026-05-27 15:46'
+updated_date: '2026-05-28 16:37'
 labels:
   - feature
   - fedramp
@@ -33,10 +34,10 @@ Create a first FedRAMP-oriented Chimera scenario pack that exercises endpoint-le
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The pack includes at least one runnable Chimera scenario for each initial family: AC, AU, IA, SC, SI, CM, and RA.
-- [ ] #2 Each scenario includes FedRAMP metadata, technical category, Chimera tag, explicit evidence expectations, and pass/fail assertions.
-- [ ] #3 Scenarios use seeded Chimera users, tenants, roles, and resources where isolation or authorization evidence is required.
-- [ ] #4 Catalog validation and Chimera compatibility checks pass for the new pack.
+- [x] #1 The pack includes at least one runnable Chimera scenario for each initial family: AC, AU, IA, SC, SI, CM, and RA.
+- [x] #2 Each scenario includes FedRAMP metadata, technical category, Chimera tag, explicit evidence expectations, and pass/fail assertions.
+- [x] #3 Scenarios use seeded Chimera users, tenants, roles, and resources where isolation or authorization evidence is required.
+- [x] #4 Catalog validation and Chimera compatibility checks pass for the new pack.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -47,3 +48,15 @@ Create a first FedRAMP-oriented Chimera scenario pack that exercises endpoint-le
 3. Use the new FedRAMP metadata from TASK-73.1 and the endpoint contract from TASK-73.2.
 4. Validate the scenario pack with catalog tests and at least one targeted Chimera compatibility pass.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented seven Chimera FedRAMP scenarios covering AC, AU, IA, SC, SI, CM, and RA with FedRAMP mappings, endpoint/evidence references, Chimera tags, technical categories, and pass/fail assertions.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the initial runnable Chimera FedRAMP scenario pack and catalog validation coverage.
+<!-- SECTION:FINAL_SUMMARY:END -->
