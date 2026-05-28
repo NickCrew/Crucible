@@ -61,6 +61,7 @@ List all scenarios on the server.
 
 ```bash
 crucible-cli scenarios
+crucible-cli scenarios --framework fedramp --baseline moderate --family AC --control-id AC-3 --show-controls
 ```
 
 ```
@@ -70,6 +71,16 @@ owasp-api-1-broken-auth     Broken Authentication   OWASP API   Beginner    5
 owasp-api-2-auth-bypass     Auth Bypass             OWASP API   Advanced    8
 ...
 ```
+
+FedRAMP discovery flags:
+
+| Flag | Description |
+|------|-------------|
+| `--framework fedramp` | Limit results to scenarios with FedRAMP mappings |
+| `--baseline <baseline>` | Filter mapped scenarios by `low`, `moderate`, `high`, or `li-saas` |
+| `--family <family>` | Filter by control family, such as `AC` or `SC` |
+| `--control-id <id>` | Filter by a control ID, such as `AC-3` |
+| `--show-controls` | Show mapped FedRAMP controls in table output |
 
 ### `assess`
 
@@ -231,9 +242,13 @@ crucible-cli reports abc123 --download html -o report.html
 
 # Download the PDF
 crucible-cli reports abc123 --download pdf -o report.pdf
+
+# Download the OSCAL-shaped FedRAMP evidence export
+crucible-cli reports abc123 --download oscal -o fedramp-evidence.oscal.json
 ```
 
 If `-o` is omitted, the file is saved as `<id>-report.<ext>` in the current directory.
+OSCAL downloads use `<id>-report.oscal.json`.
 
 ## CI integration
 
@@ -267,4 +282,5 @@ crucible-cli assess my-scenario --format json | jq '.results[0].score'
 
 - [API Client Library](api-client.md) — the TypeScript library the CLI uses internally
 - [Running Scenarios](running-scenarios.md) — using the web UI
+- [FedRAMP Functionality](fedramp.md) — scenario discovery, rollups, and OSCAL-shaped exports
 - [System Overview](../architecture/system-overview.md) — the REST endpoints and WebSocket protocol

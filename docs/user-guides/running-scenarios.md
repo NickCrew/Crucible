@@ -19,6 +19,14 @@ Each card shows:
 
 Use the **search bar** to filter by name, ID, description, category, or tags.
 
+### FedRAMP Filters
+
+FedRAMP-mapped scenarios can be filtered by framework, baseline, family, and
+control ID without replacing the technical category filter. Search also matches
+FedRAMP control IDs, families, and baselines, and mapped cards show control
+badges. See [FedRAMP Functionality](fedramp.md) for CLI, API, report, and
+OSCAL-shaped export details.
+
 ### Viewing Details
 
 Click any card to open the scenario detail dialog with three tabs:

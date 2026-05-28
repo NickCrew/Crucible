@@ -71,6 +71,14 @@ await client.health();
 await client.scenarios.list();
 // → Scenario[]
 
+await client.scenarios.list({
+  framework: 'fedramp',
+  baseline: 'moderate',
+  family: 'AC',
+  controlId: 'AC-3',
+});
+// → FedRAMP-mapped Scenario[]
+
 await client.scenarios.update(id, scenarioData);
 // → Scenario
 ```

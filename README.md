@@ -136,7 +136,10 @@ Open **http://localhost:3000** and verify the **CONNECTED** indicator appears in
 |-------|-------------|
 | [Getting Started](docs/user-guides/getting-started.md) | Install, configure, and launch Crucible |
 | [Running Scenarios](docs/user-guides/running-scenarios.md) | Browse the catalog, run simulations, and review assessments |
+| [FedRAMP Functionality](docs/user-guides/fedramp.md) | FedRAMP scenario discovery, assessment rollups, and OSCAL-shaped evidence exports |
 | [Editing Scenarios](docs/user-guides/editing-scenarios.md) | Create and modify scenario definitions |
+| [API Client Library](docs/user-guides/api-client.md) | Typed TypeScript client for the Crucible REST and WebSocket APIs |
+| [Remote CLI](docs/user-guides/cli.md) | Lightweight CLI for remote Crucible servers and CI pipelines |
 
 ### Architecture
 

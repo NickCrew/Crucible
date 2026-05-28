@@ -3,8 +3,14 @@ guides:
     url: /user-guides/getting-started
   - title: Running Scenarios
     url: /user-guides/running-scenarios
+  - title: FedRAMP Functionality
+    url: /user-guides/fedramp
   - title: Editing Scenarios
     url: /user-guides/editing-scenarios
+  - title: API Client Library
+    url: /user-guides/api-client
+  - title: Remote CLI
+    url: /user-guides/cli
 
 architecture:
   - title: System Overview
