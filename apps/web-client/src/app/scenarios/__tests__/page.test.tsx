@@ -37,7 +37,7 @@ vi.mock('@/store/useCatalogStore', () => ({
 
 // Mock the detail dialog to keep tests focused
 vi.mock('@/components/scenario-detail-dialog', () => ({
-  ScenarioDetailDialog: ({ scenario, open }: any) =>
+  ScenarioDetailDialog: ({ scenario, open }: { scenario?: { name?: string } | null; open: boolean }) =>
     open ? <div data-testid="detail-dialog">{scenario?.name}</div> : null,
 }));
 
@@ -58,7 +58,32 @@ function makeScenario(overrides: Record<string, unknown> = {}) {
       expect: { blocked: true, ...(expectOverride ? { blockedOverridableInSimulation: true } : {}) },
     }],
     ...rest,
-  } as any;
+  };
+}
+
+function makeFedRampScenario(overrides: Record<string, unknown> = {}) {
+  return makeScenario({
+    id: 'compliance-fedramp-cross-tenant',
+    name: 'FedRAMP Cross-Tenant Data Leakage Probe',
+    category: 'Compliance',
+    tags: ['fedramp'],
+    compliance: {
+      mappings: [
+        {
+          framework: 'fedramp',
+          revision: 'rev5',
+          baseline: 'moderate',
+          controlId: 'AC-3',
+          family: 'AC',
+          evidenceTypes: ['request-response'],
+          assertion: 'tenant-project-access-is-enforced',
+          rationale: 'Cross-tenant access should be denied.',
+          implementationStatus: 'implemented',
+        },
+      ],
+    },
+    ...overrides,
+  });
 }
 
 describe('ScenariosPage', () => {
@@ -110,6 +135,61 @@ describe('ScenariosPage', () => {
 
     expect(screen.getByText('SQL Injection')).toBeDefined();
     expect(screen.queryByText('Auth Bypass')).toBeNull();
+  });
+
+  it('keeps the category filter while adding FedRAMP filters', () => {
+    mockState.scenarios = [
+      makeScenario({ id: 'technical-auth', name: 'Technical Auth', category: 'auth' }),
+      makeFedRampScenario(),
+    ];
+
+    render(<ScenariosPage />);
+
+    fireEvent.change(screen.getByLabelText(/category filter/i), { target: { value: 'Compliance' } });
+
+    expect(screen.getByText('FedRAMP Cross-Tenant Data Leakage Probe')).toBeDefined();
+    expect(screen.queryByText('Technical Auth')).toBeNull();
+  });
+
+  it('filters scenarios by FedRAMP framework, baseline, family, and control ID', () => {
+    mockState.scenarios = [
+      makeFedRampScenario(),
+      makeFedRampScenario({
+        id: 'compliance-fedramp-cipher-negotiation',
+        name: 'FedRAMP Non-FIPS Cipher Negotiation Probe',
+        compliance: {
+          mappings: [
+            {
+              framework: 'fedramp',
+              revision: 'rev5',
+              baseline: 'high',
+              controlId: 'SC-13',
+              family: 'SC',
+              evidenceTypes: ['tls-handshake'],
+              assertion: 'reject-non-fips-cipher',
+              rationale: 'Weak TLS ciphers should be rejected.',
+              implementationStatus: 'implemented',
+            },
+          ],
+        },
+      }),
+      makeScenario({ id: 'plain-auth', name: 'Plain Auth', category: 'auth' }),
+    ];
+
+    render(<ScenariosPage />);
+
+    fireEvent.change(screen.getByLabelText(/framework filter/i), { target: { value: 'fedramp' } });
+    expect(screen.getByText('FedRAMP Cross-Tenant Data Leakage Probe')).toBeDefined();
+    expect(screen.getByText('FedRAMP Non-FIPS Cipher Negotiation Probe')).toBeDefined();
+    expect(screen.queryByText('Plain Auth')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/fedramp baseline filter/i), { target: { value: 'moderate' } });
+    fireEvent.change(screen.getByLabelText(/fedramp family filter/i), { target: { value: 'AC' } });
+    fireEvent.change(screen.getByLabelText(/fedramp control id filter/i), { target: { value: 'ac-3' } });
+
+    expect(screen.getByText('FedRAMP Cross-Tenant Data Leakage Probe')).toBeDefined();
+    expect(screen.queryByText('FedRAMP Non-FIPS Cipher Negotiation Probe')).toBeNull();
+    expect(screen.getByText('AC-3 moderate')).toBeDefined();
   });
 
   it('filters scenarios by tag', () => {

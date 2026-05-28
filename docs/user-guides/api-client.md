@@ -128,12 +128,18 @@ await client.reports.get(id);
 const jsonRes = await client.reports.json(id);
 const htmlRes = await client.reports.html(id);
 const pdfRes = await client.reports.pdf(id);
+const oscalRes = await client.reports.oscal(id);
 
 // Save a PDF to disk
 import { writeFile } from 'node:fs/promises';
 const buffer = Buffer.from(await pdfRes.arrayBuffer());
 await writeFile('report.pdf', buffer);
 ```
+
+`client.reports.oscal(id)` returns an OSCAL-shaped FedRAMP evidence export.
+It is intended for dynamic assessment evidence interchange and includes control
+mappings, rollups, assertion outcomes, and evidence references. It does not
+claim to be a complete FedRAMP authorization artifact.
 
 ## Error handling
 

@@ -10,7 +10,7 @@ export async function reportsCommand(
   args: string[],
 ): Promise<number> {
   let id: string | undefined;
-  let download: 'json' | 'html' | 'pdf' | undefined;
+  let download: 'json' | 'html' | 'pdf' | 'oscal' | undefined;
   let outPath: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
@@ -18,8 +18,8 @@ export async function reportsCommand(
     if (arg === '--download' || arg.startsWith('--download=')) {
       const val = readFlag(arg, args[i + 1], '--download');
       if (arg === '--download') i++;
-      if (val !== 'json' && val !== 'html' && val !== 'pdf') {
-        process.stderr.write('--download must be "json", "html", or "pdf"\n');
+      if (val !== 'json' && val !== 'html' && val !== 'pdf' && val !== 'oscal') {
+        process.stderr.write('--download must be "json", "html", "pdf", or "oscal"\n');
         return 1;
       }
       download = val;
@@ -37,14 +37,14 @@ export async function reportsCommand(
   }
 
   if (!id) {
-    process.stderr.write('Usage: crucible-cli reports <id> [--download json|html|pdf] [-o file]\n');
+    process.stderr.write('Usage: crucible-cli reports <id> [--download json|html|pdf|oscal] [-o file]\n');
     return 1;
   }
 
   if (download) {
-    const res = await client.reports[download](id);
+    const res = await downloadReport(client, download, id);
     const buffer = Buffer.from(await res.arrayBuffer());
-    const filename = outPath ?? `${id}-report.${download}`;
+    const filename = outPath ?? `${id}-report.${download === 'oscal' ? 'oscal.json' : download}`;
     await writeFile(filename, buffer);
     process.stdout.write(`Saved to ${filename}\n`);
     return 0;
@@ -53,4 +53,21 @@ export async function reportsCommand(
   const report = await client.reports.get(id);
   process.stdout.write(renderOutput(report, globals.format));
   return 0;
+}
+
+function downloadReport(
+  client: CrucibleClient,
+  format: 'json' | 'html' | 'pdf' | 'oscal',
+  id: string,
+): Promise<Response> {
+  switch (format) {
+    case 'json':
+      return client.reports.json(id);
+    case 'html':
+      return client.reports.html(id);
+    case 'pdf':
+      return client.reports.pdf(id);
+    case 'oscal':
+      return client.reports.oscal(id);
+  }
 }

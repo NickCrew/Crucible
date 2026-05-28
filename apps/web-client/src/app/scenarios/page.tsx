@@ -28,6 +28,42 @@ import { Switch } from "@/components/ui/switch"
 import { ScenarioDetailDialog } from "@/components/scenario-detail-dialog"
 import { Play, ClipboardList, Search, Loader2 } from "lucide-react"
 
+const ALL_FILTER_VALUE = "all"
+const FEDRAMP_BASELINES = ["low", "moderate", "high", "li-saas"] as const
+const FEDRAMP_CONTROL_FAMILIES = [
+  "AC",
+  "AT",
+  "AU",
+  "CA",
+  "CM",
+  "CP",
+  "IA",
+  "IR",
+  "MA",
+  "MP",
+  "PE",
+  "PL",
+  "PM",
+  "PS",
+  "PT",
+  "RA",
+  "SA",
+  "SC",
+  "SI",
+  "SR",
+] as const
+
+type FedRampBaseline = (typeof FEDRAMP_BASELINES)[number]
+type FedRampControlFamily = (typeof FEDRAMP_CONTROL_FAMILIES)[number]
+type FedRampControlId = string
+
+interface ScenarioComplianceFilter {
+  framework?: "fedramp"
+  baseline?: FedRampBaseline
+  family?: FedRampControlFamily
+  controlId?: FedRampControlId
+}
+
 interface LaunchDialogState {
   scenario: Scenario
   mode: "simulation" | "assessment"
@@ -47,6 +83,13 @@ interface ScenarioCatalogEntry {
   blockingChecks: number
 }
 
+interface ComplianceFilterState {
+  framework: typeof ALL_FILTER_VALUE | "fedramp"
+  baseline: typeof ALL_FILTER_VALUE | FedRampBaseline
+  family: typeof ALL_FILTER_VALUE | FedRampControlFamily
+  controlId: string
+}
+
 export default function ScenariosPage() {
   const router = useRouter()
   const {
@@ -61,27 +104,81 @@ export default function ScenariosPage() {
   } = useCatalogStore()
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedScenario, setSelectedScenario] = useState<Scenario | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState(ALL_FILTER_VALUE)
+  const [complianceFilters, setComplianceFilters] = useState<ComplianceFilterState>({
+    framework: ALL_FILTER_VALUE,
+    baseline: ALL_FILTER_VALUE,
+    family: ALL_FILTER_VALUE,
+    controlId: "",
+  })
   const [launchDialog, setLaunchDialog] = useState<LaunchDialogState | null>(null)
   const [launchError, setLaunchError] = useState<string | null>(null)
   const [launchTargetDraft, setLaunchTargetDraft] = useState<string | null>(null)
   const [launching, setLaunching] = useState<{ scenarioId: string; mode: "simulation" | "assessment" } | null>(null)
   const catalogTargetFamily = useMemo(() => inferTargetFamilyFromUrl(targetUrl), [targetUrl])
+  const categories = useMemo(
+    () => Array.from(new Set(scenarios.map((scenario) => scenario.category).filter(Boolean) as string[])).sort(),
+    [scenarios],
+  )
+  const fedRampControlIds = useMemo(
+    () => Array.from(new Set(scenarios.flatMap((scenario) => (
+      scenario.compliance?.mappings
+        .filter((mapping) => mapping.framework === "fedramp")
+        .map((mapping) => mapping.controlId) ?? []
+    )))).sort(),
+    [scenarios],
+  )
+  const activeComplianceFilter = useMemo(() => {
+    const controlId = complianceFilters.controlId.trim().toUpperCase()
+    const filter = {
+      ...(complianceFilters.framework !== ALL_FILTER_VALUE ? { framework: complianceFilters.framework } : {}),
+      ...(complianceFilters.baseline !== ALL_FILTER_VALUE ? { baseline: complianceFilters.baseline } : {}),
+      ...(complianceFilters.family !== ALL_FILTER_VALUE ? { family: complianceFilters.family } : {}),
+      ...(controlId ? { controlId: controlId as FedRampControlId } : {}),
+    }
+
+    return Object.keys(filter).length > 0 ? filter : null
+  }, [complianceFilters])
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
+    selectedCategory !== ALL_FILTER_VALUE ||
+    activeComplianceFilter,
+  )
 
   useEffect(() => {
     fetchScenarios()
   }, [fetchScenarios])
 
   const filtered = useMemo<ScenarioCatalogEntry[]>(() => {
-    const q = searchQuery.toLowerCase()
-    const matches = (searchQuery.trim()
-      ? scenarios.filter((s) =>
+    const q = searchQuery.trim().toLowerCase()
+    const matches = scenarios
+      .filter((s) => {
+        if (selectedCategory !== ALL_FILTER_VALUE && s.category !== selectedCategory) {
+          return false
+        }
+
+        if (activeComplianceFilter && !scenarioMatchesCompliance(s, activeComplianceFilter)) {
+          return false
+        }
+
+        if (!q) {
+          return true
+        }
+
+        return (
           s.name.toLowerCase().includes(q) ||
           s.id.toLowerCase().includes(q) ||
           s.description?.toLowerCase().includes(q) ||
           s.category?.toLowerCase().includes(q) ||
-          s.tags?.some((t) => t.toLowerCase().includes(q))
+          s.tags?.some((t) => t.toLowerCase().includes(q)) ||
+          s.compliance?.mappings.some((mapping) => (
+            mapping.controlId.toLowerCase().includes(q) ||
+            mapping.family.toLowerCase().includes(q) ||
+            mapping.baseline.toLowerCase().includes(q)
+          ))
         )
-      : scenarios).map((scenario) => ({
+      })
+      .map((scenario) => ({
         scenario,
         targetFamily: inferScenarioTargetFamily(scenario),
         compatibility: getScenarioTargetCompatibility(scenario, targetUrl),
@@ -93,7 +190,7 @@ export default function ScenariosPage() {
     }
 
     return [...matches].sort((left, right) => compareScenarioPriority(left, right, catalogTargetFamily))
-  }, [catalogTargetFamily, scenarios, searchQuery, targetUrl])
+  }, [activeComplianceFilter, catalogTargetFamily, scenarios, searchQuery, selectedCategory, targetUrl])
 
   const launchTargetState = useMemo<LaunchTargetState>(
     () => validateLaunchTargetInput(launchDialog?.targetUrl ?? ""),
@@ -220,14 +317,101 @@ export default function ScenariosPage() {
         </div>
       )}
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1.5fr)_repeat(5,minmax(8rem,1fr))_auto]">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            aria-label="Search scenarios"
+            placeholder="Search by name, category, tag, ID, or control..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <select
+          aria-label="Category filter"
+          value={selectedCategory}
+          onChange={(event) => setSelectedCategory(event.target.value)}
+          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <option value={ALL_FILTER_VALUE}>All categories</option>
+          {categories.map((category) => (
+            <option key={category} value={category}>{category}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Framework filter"
+          value={complianceFilters.framework}
+          onChange={(event) => setComplianceFilters((current) => ({
+            ...current,
+            framework: event.target.value as ComplianceFilterState["framework"],
+          }))}
+          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <option value={ALL_FILTER_VALUE}>All frameworks</option>
+          <option value="fedramp">FedRAMP</option>
+        </select>
+        <select
+          aria-label="FedRAMP baseline filter"
+          value={complianceFilters.baseline}
+          onChange={(event) => setComplianceFilters((current) => ({
+            ...current,
+            baseline: event.target.value as ComplianceFilterState["baseline"],
+          }))}
+          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <option value={ALL_FILTER_VALUE}>All baselines</option>
+          {FEDRAMP_BASELINES.map((baseline) => (
+            <option key={baseline} value={baseline}>{baseline}</option>
+          ))}
+        </select>
+        <select
+          aria-label="FedRAMP family filter"
+          value={complianceFilters.family}
+          onChange={(event) => setComplianceFilters((current) => ({
+            ...current,
+            family: event.target.value as ComplianceFilterState["family"],
+          }))}
+          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <option value={ALL_FILTER_VALUE}>All families</option>
+          {FEDRAMP_CONTROL_FAMILIES.map((family) => (
+            <option key={family} value={family}>{family}</option>
+          ))}
+        </select>
         <Input
-          placeholder="Search by name, category, tag, or ID..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-9"
+          aria-label="FedRAMP control ID filter"
+          list="fedramp-control-options"
+          placeholder="Control ID"
+          value={complianceFilters.controlId}
+          onChange={(event) => setComplianceFilters((current) => ({
+            ...current,
+            controlId: event.target.value,
+          }))}
         />
+        <datalist id="fedramp-control-options">
+          {fedRampControlIds.map((controlId) => (
+            <option key={controlId} value={controlId} />
+          ))}
+        </datalist>
+        {hasActiveFilters && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setSearchQuery("")
+              setSelectedCategory(ALL_FILTER_VALUE)
+              setComplianceFilters({
+                framework: ALL_FILTER_VALUE,
+                baseline: ALL_FILTER_VALUE,
+                family: ALL_FILTER_VALUE,
+                controlId: "",
+              })
+            }}
+          >
+            Clear filters
+          </Button>
+        )}
       </div>
 
       {launching && (
@@ -242,7 +426,9 @@ export default function ScenariosPage() {
 
       {filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center">
-          No scenarios match &ldquo;{searchQuery}&rdquo;
+          {hasActiveFilters
+            ? "No scenarios match the current filters."
+            : "No scenarios found."}
         </p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -503,6 +689,14 @@ const ScenarioCatalogCard = memo(function ScenarioCatalogCard({
           {blockingChecks > 0 ? ` - ${blockingChecks} blocking check${blockingChecks === 1 ? "" : "s"}` : ""}
         </div>
         <div className="mt-4 flex flex-wrap gap-1.5">
+          {scenario.compliance?.mappings
+            .filter((mapping) => mapping.framework === "fedramp")
+            .slice(0, 3)
+            .map((mapping) => (
+              <Badge key={`${mapping.controlId}-${mapping.baseline}`} variant="secondary" className="type-tag">
+                {mapping.controlId} {mapping.baseline}
+              </Badge>
+            ))}
           {targetFamily !== "unknown" && targetFamily !== "generic" && (
             <Badge variant={compatibility === "incompatible" ? "destructive" : "secondary"} className="type-tag">
               {getTargetFamilyLabel(targetFamily)}
@@ -563,6 +757,27 @@ const ScenarioCatalogCard = memo(function ScenarioCatalogCard({
     </Card>
   )
 })
+
+function scenarioMatchesCompliance(scenario: Scenario, filter: ScenarioComplianceFilter): boolean {
+  const mappings = scenario.compliance?.mappings ?? []
+
+  return mappings.some((mapping) => {
+    if (filter.framework && mapping.framework !== filter.framework) {
+      return false
+    }
+    if (filter.baseline && mapping.baseline !== filter.baseline) {
+      return false
+    }
+    if (filter.family && mapping.family !== filter.family) {
+      return false
+    }
+    if (filter.controlId && mapping.controlId !== filter.controlId) {
+      return false
+    }
+
+    return true
+  })
+}
 
 function validateLaunchTargetInput(value: string): LaunchTargetState {
   try {

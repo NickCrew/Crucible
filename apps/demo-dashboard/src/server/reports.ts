@@ -1,7 +1,9 @@
+import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import {
   type Request as ScenarioRequest,
+  type FedRampComplianceMapping,
   type Scenario,
   type ScenarioRunnerStep,
   getScenarioStepType,
@@ -45,6 +47,54 @@ export interface FrameworkCompliance {
   passed: boolean;
   score: number;
   rules: ResolvedRule[];
+  counts?: ComplianceStatusCounts;
+  families?: ComplianceFamilyRollup[];
+  controls?: ComplianceControlRollup[];
+}
+
+export type ComplianceControlStatus = 'passed' | 'failed' | 'skipped' | 'unknown';
+
+export interface ComplianceStatusCounts {
+  passed: number;
+  failed: number;
+  skipped: number;
+  unknown: number;
+}
+
+export interface ComplianceEvidenceReference {
+  stepId?: string;
+  description?: string;
+  type: string;
+  status: ExecutionStepResult['status'] | 'not-run';
+  assertions: Array<{
+    field: string;
+    passed: boolean;
+  }>;
+  endpoint?: {
+    method: ScenarioRequest['method'];
+    path: string;
+  };
+}
+
+export interface ComplianceControlRollup {
+  framework: 'fedramp';
+  revision: string;
+  baseline: string;
+  family: string;
+  controlId: string;
+  assertion: string;
+  rationale: string;
+  status: ComplianceControlStatus;
+  implementationStatus: string;
+  evidenceTypes: string[];
+  endpoint?: FedRampComplianceMapping['endpoint'];
+  evidence: ComplianceEvidenceReference[];
+}
+
+export interface ComplianceFamilyRollup {
+  family: string;
+  counts: ComplianceStatusCounts;
+  controls: ComplianceControlRollup[];
 }
 
 export interface AssessmentReportPayload {
@@ -69,6 +119,7 @@ export interface AssessmentReportPayload {
     category?: string;
     difficulty?: string;
     rule_ids?: string[];
+    compliance?: Scenario['compliance'];
   };
   compliance?: {
     frameworks: Record<string, FrameworkCompliance>;
@@ -76,6 +127,7 @@ export interface AssessmentReportPayload {
   exports: {
     json: string;
     html: string;
+    oscal: string;
   };
   steps: Array<{
     id: string;
@@ -113,6 +165,7 @@ export class ReportService {
 
   static readonly HTML_SUFFIX = 'html';
   static readonly JSON_SUFFIX = 'json';
+  static readonly OSCAL_SUFFIX = 'oscal.json';
 
   constructor(config: ReportServiceConfig) {
     this.reportsDir = config.reportsDir;
@@ -127,7 +180,7 @@ export class ReportService {
   async generateReports(
     execution: ScenarioExecution,
     scenario: Scenario,
-  ): Promise<{ jsonPath: string; htmlPath: string }> {
+  ): Promise<{ jsonPath: string; htmlPath: string; oscalPath: string }> {
     while (this.locks.has(execution.id)) {
       await this.locks.get(execution.id);
     }
@@ -136,7 +189,8 @@ export class ReportService {
       const payload = this.buildReportPayload(execution, scenario);
       const jsonPath = await this.generateJsonReport(execution.id, payload);
       const htmlPath = await this.generateHtmlReport(execution.id, payload);
-      return { jsonPath, htmlPath };
+      const oscalPath = await this.generateOscalReport(execution.id, buildOscalShapedExport(payload));
+      return { jsonPath, htmlPath, oscalPath };
     })();
 
     this.locks.set(execution.id, reportPromise.then(() => {}).catch(() => {}));
@@ -154,6 +208,7 @@ export class ReportService {
   ): AssessmentReportPayload {
     const jsonExport = `${this.baseUrl}/api/reports/${execution.id}?format=${ReportService.JSON_SUFFIX}`;
     const htmlExport = `${this.baseUrl}/api/reports/${execution.id}?format=${ReportService.HTML_SUFFIX}`;
+    const oscalExport = `${this.baseUrl}/api/reports/${execution.id}?format=${ReportService.OSCAL_SUFFIX}`;
     const stepResults = new Map(execution.steps.map((step) => [step.stepId, step]));
 
     const frameworks: Record<string, FrameworkCompliance> = {};
@@ -175,6 +230,7 @@ export class ReportService {
         }
       }
     }
+    addComplianceMappingsToFrameworks(frameworks, scenario, stepResults);
 
     return {
       generatedAt: new Date().toISOString(),
@@ -198,11 +254,13 @@ export class ReportService {
         category: scenario.category,
         difficulty: scenario.difficulty,
         rule_ids: scenario.rule_ids,
+        compliance: scenario.compliance,
       },
       compliance: Object.keys(frameworks).length > 0 ? { frameworks } : undefined,
       exports: {
         json: jsonExport,
         html: htmlExport,
+        oscal: oscalExport,
       },
       steps: scenario.steps.map((definition) => {
         const result = stepResults.get(definition.id);
@@ -253,6 +311,334 @@ export class ReportService {
     writeFileSync(filePath, renderHtmlReport(payload));
     return filePath;
   }
+
+  private async generateOscalReport(
+    executionId: string,
+    payload: OscalShapedEvidenceExport,
+  ): Promise<string> {
+    const fileName = `${executionId}.${ReportService.OSCAL_SUFFIX}`;
+    const filePath = join(this.reportsDir, fileName);
+    writeFileSync(filePath, JSON.stringify(payload, null, 2));
+    return filePath;
+  }
+}
+
+interface OscalShapedEvidenceExport {
+  oscalVersion: string;
+  profile: string;
+  metadata: {
+    title: string;
+    generatedAt: string;
+    assessmentId: string;
+    targetUrl?: string;
+    remarks: string;
+  };
+  results: Array<{
+    uuid: string;
+    title: string;
+    description?: string;
+    start?: string;
+    end?: string;
+    reviewedControls: {
+      controlSelections: Array<{
+        includeControls: Array<{ controlId: string }>;
+      }>;
+    };
+    observations: Array<{
+      uuid: string;
+      title: string;
+      description?: string;
+      methods: string[];
+      collected: string;
+      subjects: Array<{ type: string; title: string }>;
+      relevantEvidence: Array<{ href: string; description?: string }>;
+    }>;
+    findings: Array<{
+      uuid: string;
+      title: string;
+      description: string;
+      target: { type: string; targetId: string };
+      status: { state: 'satisfied' | 'not-satisfied' | 'not-applicable' };
+      relatedObservations: Array<{ observationUuid: string }>;
+      props: Array<{ name: string; value: string }>;
+    }>;
+  }>;
+  limitations: string[];
+}
+
+function addComplianceMappingsToFrameworks(
+  frameworks: Record<string, FrameworkCompliance>,
+  scenario: Scenario,
+  stepResults: Map<string, ExecutionStepResult>,
+): void {
+  const fedrampMappings = (scenario.compliance?.mappings ?? []).filter(
+    (mapping): mapping is FedRampComplianceMapping => mapping.framework === 'fedramp',
+  );
+  if (fedrampMappings.length === 0) {
+    return;
+  }
+
+  const controls = fedrampMappings.map((mapping) => buildControlRollup(mapping, stepResults));
+  const counts = countControlStatuses(controls);
+  const families = groupControlRollupsByFamily(controls);
+  const passed = controls.length > 0 && controls.every((control) => control.status === 'passed');
+
+  frameworks.fedramp = {
+    ...(frameworks.fedramp ?? { name: 'fedramp', rules: [] }),
+    name: 'fedramp',
+    passed,
+    score: controls.length > 0 ? Math.round((counts.passed / controls.length) * 100) : 0,
+    rules: frameworks.fedramp?.rules ?? [],
+    counts,
+    families,
+    controls,
+  };
+}
+
+function buildControlRollup(
+  mapping: FedRampComplianceMapping,
+  stepResults: Map<string, ExecutionStepResult>,
+): ComplianceControlRollup {
+  const evidence = buildEvidenceReferences(mapping, stepResults);
+
+  return {
+    framework: 'fedramp',
+    revision: mapping.revision,
+    baseline: mapping.baseline,
+    family: mapping.family,
+    controlId: mapping.controlId,
+    assertion: mapping.assertion,
+    rationale: mapping.rationale,
+    status: determineControlStatus(evidence),
+    implementationStatus: mapping.implementationStatus,
+    evidenceTypes: mapping.evidenceTypes,
+    endpoint: mapping.endpoint,
+    evidence,
+  };
+}
+
+function buildEvidenceReferences(
+  mapping: FedRampComplianceMapping,
+  stepResults: Map<string, ExecutionStepResult>,
+): ComplianceEvidenceReference[] {
+  const explicitEvidence = mapping.evidence ?? [];
+  if (explicitEvidence.length === 0) {
+    const implicitStatus = summarizeImplicitEvidenceStatus([...stepResults.values()]);
+    const implicitAssertions = [...stepResults.values()].flatMap((result) => result.assertions ?? []);
+
+    return mapping.evidenceTypes.map((type) => ({
+      type,
+      description: `${mapping.controlId} evidence: ${type}`,
+      status: implicitStatus,
+      assertions: implicitAssertions.map((assertion) => ({
+        field: assertion.field,
+        passed: assertion.passed,
+      })),
+      endpoint: mapping.endpoint
+        ? { method: mapping.endpoint.method, path: mapping.endpoint.path }
+        : undefined,
+    }));
+  }
+
+  return explicitEvidence.map((evidence) => {
+    const result = evidence.stepId ? stepResults.get(evidence.stepId) : undefined;
+    return {
+      type: evidence.type,
+      stepId: evidence.stepId,
+      description: evidence.description,
+      status: result?.status ?? 'not-run',
+      assertions: (result?.assertions ?? []).map((assertion) => ({
+        field: assertion.field,
+        passed: assertion.passed,
+      })),
+      endpoint: mapping.endpoint
+        ? { method: mapping.endpoint.method, path: mapping.endpoint.path }
+        : undefined,
+    };
+  });
+}
+
+function summarizeImplicitEvidenceStatus(
+  results: ExecutionStepResult[],
+): ComplianceEvidenceReference['status'] {
+  if (results.length === 0) {
+    return 'not-run';
+  }
+
+  if (results.some((result) => result.status === 'failed')) {
+    return 'failed';
+  }
+
+  if (results.some((result) => result.status === 'pending' || result.status === 'running' || result.status === 'paused')) {
+    return 'running';
+  }
+
+  if (results.some((result) => result.status === 'skipped')) {
+    return 'skipped';
+  }
+
+  if (results.some((result) => result.status === 'cancelled')) {
+    return 'cancelled';
+  }
+
+  return 'completed';
+}
+
+function determineControlStatus(evidence: ComplianceEvidenceReference[]): ComplianceControlStatus {
+  if (evidence.some((item) => item.status === 'failed' || item.assertions.some((assertion) => !assertion.passed))) {
+    return 'failed';
+  }
+
+  if (
+    evidence.length === 0
+    || evidence.some((item) => (
+      item.status === 'not-run'
+      || item.status === 'pending'
+      || item.status === 'running'
+      || item.status === 'paused'
+    ))
+  ) {
+    return 'unknown';
+  }
+
+  if (evidence.some((item) => item.status === 'skipped' || item.status === 'cancelled')) {
+    return 'skipped';
+  }
+
+  return 'passed';
+}
+
+function countControlStatuses(controls: ComplianceControlRollup[]): ComplianceStatusCounts {
+  return controls.reduce<ComplianceStatusCounts>(
+    (counts, control) => {
+      counts[control.status] += 1;
+      return counts;
+    },
+    { passed: 0, failed: 0, skipped: 0, unknown: 0 },
+  );
+}
+
+function groupControlRollupsByFamily(controls: ComplianceControlRollup[]): ComplianceFamilyRollup[] {
+  const byFamily = new Map<string, ComplianceControlRollup[]>();
+  for (const control of controls) {
+    byFamily.set(control.family, [...(byFamily.get(control.family) ?? []), control]);
+  }
+
+  return [...byFamily.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([family, familyControls]) => ({
+      family,
+      controls: familyControls,
+      counts: countControlStatuses(familyControls),
+    }));
+}
+
+function buildOscalShapedExport(payload: AssessmentReportPayload): OscalShapedEvidenceExport {
+  const controls = Object.values(payload.compliance?.frameworks ?? {})
+    .flatMap((framework) => framework.controls ?? [])
+    .filter((control) => control.framework === 'fedramp');
+  const observationIds = new Map<ComplianceControlRollup, string>();
+  for (const control of controls) {
+    observationIds.set(control, stableEvidenceId('obs', payload.execution.id, control.controlId, control.assertion));
+  }
+
+  return {
+    oscalVersion: '1.1.2',
+    profile: 'crucible-fedramp-assessment-results-shaped',
+    metadata: {
+      title: `${payload.scenario.name} FedRAMP evidence export`,
+      generatedAt: payload.generatedAt,
+      assessmentId: payload.execution.id,
+      targetUrl: payload.execution.targetUrl,
+      remarks: 'Crucible exports dynamic assessment evidence in an OSCAL-shaped structure. This is not a complete FedRAMP authorization package.',
+    },
+    results: [
+      {
+        uuid: stableEvidenceId('result', payload.execution.id),
+        title: payload.scenario.name,
+        description: payload.scenario.description,
+        start: payload.execution.startedAt ? new Date(payload.execution.startedAt).toISOString() : undefined,
+        end: payload.execution.completedAt ? new Date(payload.execution.completedAt).toISOString() : undefined,
+        reviewedControls: {
+          controlSelections: [
+            {
+              includeControls: controls.map((control) => ({ controlId: control.controlId })),
+            },
+          ],
+        },
+        observations: controls.map((control) => ({
+          uuid: observationIds.get(control)!,
+          title: `${control.controlId} ${control.assertion}`,
+          description: control.rationale,
+          methods: ['TEST'],
+          collected: payload.generatedAt,
+          subjects: [
+            {
+              type: 'component',
+              title: control.endpoint
+                ? `${control.endpoint.method} ${control.endpoint.path}`
+                : payload.scenario.id,
+            },
+          ],
+          relevantEvidence: control.evidence.map((evidence) => ({
+            href: evidence.stepId ? `#/steps/${evidence.stepId}` : '#/scenario/compliance',
+            description: evidence.description,
+          })),
+        })),
+        findings: controls.map((control) => ({
+          uuid: stableEvidenceId('finding', payload.execution.id, control.controlId, control.assertion),
+          title: `${control.controlId} ${control.status}`,
+          description: control.rationale,
+          target: {
+            type: 'objective-id',
+            targetId: control.assertion,
+          },
+          status: {
+            state: toOscalFindingState(control.status),
+          },
+          relatedObservations: [{ observationUuid: observationIds.get(control)! }],
+          props: [
+            { name: 'framework', value: control.framework },
+            { name: 'baseline', value: control.baseline },
+            { name: 'family', value: control.family },
+            { name: 'implementation-status', value: control.implementationStatus },
+          ],
+        })),
+      },
+    ],
+    limitations: [
+      'This is not a complete FedRAMP authorization package.',
+      'Includes dynamic request, response, assertion, endpoint, and runner evidence collected by Crucible only.',
+      'Does not include FedRAMP policy documents, SSP content, POA&M workflow, inventory, or 3PAO attestation artifacts.',
+      'Uses OSCAL-shaped JSON for compatibility and future mapping; formal OSCAL conformance is intentionally not claimed.',
+    ],
+  };
+}
+
+function stableEvidenceId(...parts: string[]): string {
+  const bytes = createHash('sha256').update(parts.join('\0')).digest();
+
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = bytes.subarray(0, 16).toString('hex');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-');
+}
+
+function toOscalFindingState(status: ComplianceControlStatus): 'satisfied' | 'not-satisfied' | 'not-applicable' {
+  if (status === 'passed') {
+    return 'satisfied';
+  }
+  if (status === 'failed') {
+    return 'not-satisfied';
+  }
+  return 'not-applicable';
 }
 
 function renderHtmlReport(payload: AssessmentReportPayload): string {
@@ -277,12 +663,31 @@ function renderHtmlReport(payload: AssessmentReportPayload): string {
                 <span class="badge ${fw.passed ? 'pass' : 'fail'}">${fw.score}% RESULT</span>
               </div>
               <ul class="control-list">
+                ${(fw.families ?? [])
+                  .map(
+                    (family) => `
+                  <li class="control-item">
+                    <span class="control-id">${escapeHtml(family.family)}</span>
+                    <span>${formatComplianceCounts(family.counts)}</span>
+                  </li>`,
+                  )
+                  .join('')}
                 ${fw.rules
                   .map(
                     (rule) => `
                   <li class="control-item">
                     <span class="control-id">${escapeHtml(rule.id)}</span>
                     <span>${escapeHtml(rule.title)}</span>
+                  </li>`,
+                  )
+                  .join('')}
+                ${(fw.controls ?? [])
+                  .map(
+                    (control) => `
+                  <li class="control-item">
+                    <span class="control-id">${escapeHtml(control.controlId)}</span>
+                    <span>${escapeHtml(control.status.toUpperCase())} - ${escapeHtml(control.assertion)}</span>
+                    ${control.endpoint ? `<br /><span class="muted">${escapeHtml(`${control.endpoint.method} ${control.endpoint.path}`)}</span>` : ''}
                   </li>`,
                   )
                   .join('')}
@@ -697,6 +1102,15 @@ function formatDuration(duration?: number): string {
     return `${duration}ms`;
   }
   return `${(duration / 1000).toFixed(1)}s`;
+}
+
+function formatComplianceCounts(counts: ComplianceStatusCounts): string {
+  return [
+    `${counts.passed} passed`,
+    `${counts.failed} failed`,
+    `${counts.skipped} skipped`,
+    `${counts.unknown} unknown`,
+  ].join(' / ');
 }
 
 function badgeClass(status: ExecutionStepResult['status']): string {

@@ -2,6 +2,7 @@ import type {
   CrucibleClient,
   ExecutionStepResult,
   RunnerSummary,
+  Scenario,
   ScenarioExecution,
 } from '@atlascrew/crucible-client';
 import { renderTable, formatDuration } from '../format.js';
@@ -40,6 +41,8 @@ interface AssessScenarioResult {
   error?: string;
   stepCount: number;
   failedStepCount: number;
+  fedrampControls?: string[];
+  fedrampFamilies?: string[];
   steps: AssessStepDetail[];
 }
 
@@ -51,6 +54,16 @@ interface AssessResult {
   passed: boolean;
   exitCode: 0 | 1;
   results: AssessScenarioResult[];
+}
+
+interface ScenarioWithFedRampCompliance {
+  compliance?: {
+    mappings?: Array<{
+      framework: string;
+      controlId: string;
+      family: string;
+    }>;
+  };
 }
 
 export async function assessCommand(
@@ -68,6 +81,7 @@ export async function assessCommand(
   }
 
   const results: AssessScenarioResult[] = [];
+  const scenarioMap = await loadScenarioMap(client);
 
   for (const scenarioId of options.scenarioIds) {
     if (globals.format === 'table') {
@@ -79,7 +93,7 @@ export async function assessCommand(
       options.targetUrl !== undefined ? { targetUrl: options.targetUrl } : undefined,
     );
     const execution = await pollUntilDone(client, executionId, options.pollInterval);
-    results.push(buildResult(execution, options.failBelow));
+    results.push(buildResult(execution, options.failBelow, scenarioMap.get(scenarioId)));
   }
 
   const passed = results.every((r) => r.meetsThreshold);
@@ -178,10 +192,18 @@ async function pollUntilDone(
   }
 }
 
-function buildResult(execution: ScenarioExecution, failBelow: number): AssessScenarioResult {
+function buildResult(
+  execution: ScenarioExecution,
+  failBelow: number,
+  scenario?: Scenario,
+): AssessScenarioResult {
   const score = execution.report?.score ?? null;
   const failedStepCount = execution.steps.filter((s) => s.status === 'failed').length;
   const meetsThreshold = execution.status === 'completed' && score !== null && score >= failBelow;
+  const fedrampMappings = ((scenario as ScenarioWithFedRampCompliance | undefined)?.compliance?.mappings ?? [])
+    .filter((mapping) => mapping.framework === 'fedramp');
+  const fedrampControls = [...new Set(fedrampMappings.map((mapping) => mapping.controlId))].sort();
+  const fedrampFamilies = [...new Set(fedrampMappings.map((mapping) => mapping.family))].sort();
 
   return {
     scenarioId: execution.scenarioId,
@@ -195,8 +217,18 @@ function buildResult(execution: ScenarioExecution, failBelow: number): AssessSce
     error: execution.error,
     stepCount: execution.steps.length,
     failedStepCount,
+    ...(fedrampControls.length > 0 ? { fedrampControls, fedrampFamilies } : {}),
     steps: execution.steps.map(buildStepDetail),
   };
+}
+
+async function loadScenarioMap(client: CrucibleClient): Promise<Map<string, Scenario>> {
+  try {
+    const scenarios = await client.scenarios.list();
+    return new Map(scenarios.map((scenario) => [scenario.id, scenario]));
+  } catch {
+    return new Map();
+  }
 }
 
 function buildStepDetail(step: ExecutionStepResult): AssessStepDetail {
@@ -225,6 +257,14 @@ function writeAssessTable(result: AssessResult): void {
   process.stdout.write(
     `\nOverall: ${result.passed ? 'PASS' : 'FAIL'} (${result.results.filter((r) => r.meetsThreshold).length}/${result.results.length} met threshold)\n`,
   );
+
+  const fedrampLines = result.results
+    .filter((r) => r.fedrampControls && r.fedrampControls.length > 0)
+    .map((r) => `  ${r.scenarioId}: ${(r.fedrampFamilies ?? []).join(', ')} (${r.fedrampControls!.join(', ')})`);
+  if (fedrampLines.length > 0) {
+    process.stdout.write('\nFedRAMP controls:\n');
+    process.stdout.write(`${fedrampLines.join('\n')}\n`);
+  }
 
   const failedBlocks = result.results
     .map((r) => formatScenarioStepBlock(r, (s) => s.status === 'failed'))

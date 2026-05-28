@@ -1,0 +1,82 @@
+{
+  "id": "chimera-fedramp-ra-risk-findings",
+  "name": "Chimera FedRAMP RA Risk Findings Evidence",
+  "description": "Deterministic vulnerability and risk finding evidence from Chimera defense metrics.",
+  "category": "Risk Assessment",
+  "difficulty": "Intermediate",
+  "tags": ["chimera", "fedramp", "risk-assessment", "vulnerability-management", "metrics"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "fedramp",
+        "revision": "rev5",
+        "baseline": "moderate",
+        "controlId": "RA-5",
+        "family": "RA",
+        "evidenceTypes": ["request-response", "config-state", "openapi-operation"],
+        "assertion": "fedramp-risk-findings-are-reported",
+        "rationale": "Risk-assessment scenarios need deterministic vulnerability finding evidence and a strict comparison path.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "GET",
+          "path": "/api/defense/metrics",
+          "fedrampAssertion": "fedramp-risk-findings-are-reported"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "read-vulnerable-risk-findings",
+            "description": "Vulnerable mode reports the open deterministic risk finding."
+          },
+          {
+            "type": "request-response",
+            "stepId": "read-strict-risk-findings",
+            "description": "Strict comparison mode marks the same deterministic finding blocked."
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "read-vulnerable-risk-findings",
+      "name": "Read Vulnerable Risk Findings",
+      "stage": "evidence",
+      "request": {
+        "method": "GET",
+        "url": "/api/defense/metrics",
+        "params": {
+          "fedramp": "true"
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "status": 200,
+        "bodyContains": "\"status\":\"open\""
+      }
+    },
+    {
+      "id": "read-strict-risk-findings",
+      "name": "Read Strict Risk Findings",
+      "stage": "verification",
+      "dependsOn": ["read-vulnerable-risk-findings"],
+      "request": {
+        "method": "GET",
+        "url": "/api/defense/metrics",
+        "params": {
+          "fedramp": "true",
+          "strict_mode": "true"
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "status": 200,
+        "bodyContains": "\"status\":\"blocked\""
+      }
+    }
+  ]
+}

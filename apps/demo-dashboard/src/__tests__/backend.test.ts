@@ -6,6 +6,7 @@ import {
   artifactContentType,
   isArtifactExposable,
   parseAssessmentLaunchRequest,
+  parseScenarioListQuery,
   parseSimulationLaunchRequest,
   resolveArtifactPath,
 } from '../server/backend.js';
@@ -176,6 +177,61 @@ describe('backend launch request parsing', () => {
     }
 
     expect(result.error.issues[0]?.message).toContain('http or https');
+  });
+});
+
+describe('backend scenario list query parsing', () => {
+  it('normalizes FedRAMP scenario discovery filters', () => {
+    const result = parseScenarioListQuery({
+      framework: 'fedramp',
+      baseline: 'moderate',
+      family: 'AC',
+      controlId: 'AC-3',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    expect(result.data).toEqual({
+      framework: 'fedramp',
+      baseline: 'moderate',
+      family: 'AC',
+      controlId: 'AC-3',
+    });
+  });
+
+  it('accepts control_id as a query alias', () => {
+    const result = parseScenarioListQuery({
+      framework: 'fedramp',
+      control_id: 'SC-13',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    expect(result.data?.controlId).toBe('SC-13');
+  });
+
+  it('rejects invalid FedRAMP scenario discovery filters', () => {
+    const result = parseScenarioListQuery({
+      framework: 'fedramp',
+      baseline: 'impact-level-5',
+      family: 'BAD',
+      controlId: 'ac3',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+
+    expect(result.error.issues.map((issue) => issue.path.join('.'))).toEqual(
+      expect.arrayContaining(['baseline', 'family', 'controlId']),
+    );
   });
 });
 

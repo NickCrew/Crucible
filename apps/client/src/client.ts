@@ -9,6 +9,7 @@ import type {
   CrucibleSocketOptions,
   GetReportOptions,
   HealthResponse,
+  ListScenariosParams,
   ListExecutionsParams,
   OkResponse,
   RestartResponse,
@@ -127,8 +128,19 @@ class ScenariosNamespace {
   constructor(private client: CrucibleClient) {}
 
   /** List all scenarios. */
-  async list(): Promise<Scenario[]> {
-    return this.client.get(`${this.client.api}/scenarios`);
+  async list(params?: ListScenariosParams): Promise<Scenario[]> {
+    const query = new URLSearchParams();
+    if (params) {
+      if (params.framework) query.set('framework', params.framework);
+      if (params.baseline) query.set('baseline', params.baseline);
+      if (params.family) query.set('family', params.family);
+      if (params.controlId) query.set('controlId', params.controlId);
+    }
+    const queryString = query.toString();
+    const path = queryString
+      ? `${this.client.api}/scenarios?${queryString}`
+      : `${this.client.api}/scenarios`;
+    return this.client.get(path);
   }
 
   /** Update a scenario by ID. */
@@ -276,5 +288,10 @@ class ReportsNamespace {
   /** Download the PDF report file. */
   async pdf(id: string): Promise<Response> {
     return this.client.fetchRaw(`${this.client.api}/reports/${encodeURIComponent(id)}/pdf`);
+  }
+
+  /** Download the OSCAL-shaped FedRAMP evidence export file. */
+  async oscal(id: string): Promise<Response> {
+    return this.client.fetchRaw(`${this.client.api}/reports/${encodeURIComponent(id)}/oscal`);
   }
 }

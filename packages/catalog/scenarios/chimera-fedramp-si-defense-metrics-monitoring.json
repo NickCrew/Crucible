@@ -1,0 +1,56 @@
+{
+  "id": "chimera-fedramp-si-defense-metrics-monitoring",
+  "name": "Chimera FedRAMP SI Defense Metrics Monitoring",
+  "description": "Deterministic monitoring and validation evidence from Chimera defense metrics.",
+  "category": "Security Monitoring",
+  "difficulty": "Intermediate",
+  "tags": ["chimera", "fedramp", "system-integrity", "monitoring", "metrics"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "fedramp",
+        "revision": "rev5",
+        "baseline": "moderate",
+        "controlId": "SI-4",
+        "family": "SI",
+        "evidenceTypes": ["request-response", "config-state", "audit-log", "openapi-operation"],
+        "assertion": "fedramp-monitoring-signals-are-present",
+        "rationale": "FedRAMP monitoring scenarios need deterministic evidence that monitoring and validation signals are emitted.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "GET",
+          "path": "/api/defense/metrics",
+          "fedrampAssertion": "fedramp-monitoring-signals-are-present"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "read-fedramp-defense-metrics",
+            "description": "FedRAMP metrics response includes deterministic monitoring counts and required signals."
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "read-fedramp-defense-metrics",
+      "name": "Read FedRAMP Defense Metrics",
+      "stage": "evidence",
+      "request": {
+        "method": "GET",
+        "url": "/api/defense/metrics",
+        "params": {
+          "fedramp": "true"
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "status": 200,
+        "bodyContains": "FEDRAMP-RA-5-001"
+      }
+    }
+  ]
+}

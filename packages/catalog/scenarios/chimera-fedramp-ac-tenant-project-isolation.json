@@ -1,0 +1,88 @@
+{
+  "id": "chimera-fedramp-ac-tenant-project-isolation",
+  "name": "Chimera FedRAMP AC Tenant Project Isolation",
+  "description": "Cross-tenant project access probe using deterministic Chimera FedRAMP tenants and users.",
+  "category": "IDOR",
+  "difficulty": "Intermediate",
+  "tags": ["chimera", "fedramp", "access-control", "tenant-isolation", "idor"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "fedramp",
+        "revision": "rev5",
+        "baseline": "moderate",
+        "controlId": "AC-3",
+        "family": "AC",
+        "evidenceTypes": ["request-response", "tenant-fixture", "audit-log"],
+        "assertion": "tenant-project-access-is-enforced",
+        "rationale": "A tenant A user must not read tenant B projects; request and audit evidence support access enforcement assessment.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "GET",
+          "path": "/api/v1/saas/tenants/{tenant_id}/projects",
+          "fedrampAssertion": "tenant-project-access-is-enforced"
+        },
+        "evidence": [
+          {
+            "type": "tenant-fixture",
+            "stepId": "read-own-tenant-projects",
+            "description": "Seeded tenant A user and project establish the authorized baseline."
+          },
+          {
+            "type": "request-response",
+            "stepId": "read-cross-tenant-projects",
+            "description": "Tenant A user attempts to read tenant B project data."
+          },
+          {
+            "type": "audit-log",
+            "stepId": "read-cross-tenant-projects",
+            "description": "Assessment expects an authorization decision to be auditable."
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "read-own-tenant-projects",
+      "name": "Read Tenant A Projects",
+      "stage": "baseline",
+      "request": {
+        "method": "GET",
+        "url": "/api/v1/saas/tenants/fedramp-tenant-a/projects",
+        "headers": {
+          "X-User-Id": "fedramp-user-a",
+          "X-Tenant-Id": "fedramp-tenant-a"
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "status": 200,
+        "bodyContains": "fedramp-proj-a-001"
+      }
+    },
+    {
+      "id": "read-cross-tenant-projects",
+      "name": "Attempt Tenant B Project Read",
+      "stage": "exploitation",
+      "dependsOn": ["read-own-tenant-projects"],
+      "request": {
+        "method": "GET",
+        "url": "/api/v1/saas/tenants/fedramp-tenant-b/projects",
+        "headers": {
+          "X-User-Id": "fedramp-user-a",
+          "X-Tenant-Id": "fedramp-tenant-a"
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "blocked": true,
+        "bodyNotContains": "fedramp-proj-b-001"
+      }
+    }
+  ]
+}

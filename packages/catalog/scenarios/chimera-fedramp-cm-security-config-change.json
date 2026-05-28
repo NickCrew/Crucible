@@ -1,0 +1,67 @@
+{
+  "id": "chimera-fedramp-cm-security-config-change",
+  "name": "Chimera FedRAMP CM Security Config Change",
+  "description": "Unauthorized global security configuration change probe with deterministic FedRAMP evidence.",
+  "category": "Insecure Configuration",
+  "difficulty": "Advanced",
+  "tags": ["chimera", "fedramp", "configuration-management", "admin", "change-control"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "fedramp",
+        "revision": "rev5",
+        "baseline": "moderate",
+        "controlId": "CM-5",
+        "family": "CM",
+        "evidenceTypes": ["request-response", "config-state", "audit-log"],
+        "assertion": "unauthorized-security-config-change-is-denied",
+        "rationale": "Configuration-management scenarios need evidence that unauthorized security setting changes are blocked or recorded.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "POST",
+          "path": "/api/v1/admin/security-config",
+          "fedrampAssertion": "deny-unauthorized-security-config-change"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "attempt-disable-security-controls",
+            "description": "Admin config mutation request captures the vulnerable change-control path."
+          },
+          {
+            "type": "config-state",
+            "stepId": "attempt-disable-security-controls",
+            "description": "Response body should reveal whether security controls were changed."
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "attempt-disable-security-controls",
+      "name": "Attempt Unauthorized Security Config Change",
+      "stage": "exploitation",
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/admin/security-config",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-User-Id": "fedramp-user-a"
+        },
+        "body": {
+          "sql_injection_protection": false,
+          "audit_logging": false,
+          "mfa_required": false
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "blocked": true,
+        "bodyNotContains": "\"status\":\"updated\""
+      }
+    }
+  ]
+}

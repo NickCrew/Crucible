@@ -1,0 +1,70 @@
+{
+  "id": "chimera-fedramp-sc-service-trust-boundary",
+  "name": "Chimera FedRAMP SC Service Trust Boundary",
+  "description": "Service-to-service trust boundary probe using the Chimera integration frame simulation endpoint.",
+  "category": "Service Trust Abuse",
+  "difficulty": "Advanced",
+  "tags": ["chimera", "fedramp", "system-communications", "service-trust", "boundary"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "fedramp",
+        "revision": "rev5",
+        "baseline": "moderate",
+        "controlId": "SC-7",
+        "family": "SC",
+        "evidenceTypes": ["request-response", "runner-artifact", "openapi-operation"],
+        "assertion": "service-frame-trust-boundary-is-enforced",
+        "rationale": "Forged service frames exercise endpoint-level system communications boundary evidence.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "POST",
+          "path": "/api/v1/integrations/ws/simulate-frame",
+          "fedrampAssertion": "service-frame-trust-boundary-is-enforced"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "submit-forged-service-frame",
+            "description": "Forged internal-service frame should be rejected or clearly flagged."
+          },
+          {
+            "type": "openapi-operation",
+            "description": "Chimera OpenAPI annotations define the SC boundary assertion for this endpoint."
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "submit-forged-service-frame",
+      "name": "Submit Forged Service Frame",
+      "stage": "exploitation",
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/integrations/ws/simulate-frame",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Service-Name": "fedramp-untrusted-service"
+        },
+        "body": {
+          "tenant_id": "fedramp-tenant-a",
+          "source_service": "fedramp-untrusted-service",
+          "target_service": "fedramp-billing-service",
+          "frame": {
+            "operation": "grant_project_access",
+            "project_id": "fedramp-proj-b-001"
+          }
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "blocked": true,
+        "bodyNotContains": "trusted\":true"
+      }
+    }
+  ]
+}

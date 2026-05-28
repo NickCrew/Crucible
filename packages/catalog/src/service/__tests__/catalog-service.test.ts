@@ -33,6 +33,41 @@ function validScenarioJson(id: string, name = 'Test Scenario') {
   });
 }
 
+function complianceScenarioJson(
+  id: string,
+  name: string,
+  mapping: { baseline: string; controlId: string; family: string },
+) {
+  return JSON.stringify({
+    id,
+    name,
+    category: 'Compliance',
+    compliance: {
+      mappings: [
+        {
+          framework: 'fedramp',
+          revision: 'rev5',
+          baseline: mapping.baseline,
+          controlId: mapping.controlId,
+          family: mapping.family,
+          evidenceTypes: ['request-response'],
+          assertion: `${id}-assertion`,
+          rationale: 'Collects scenario evidence for FedRAMP control mapping tests.',
+          implementationStatus: 'implemented',
+        },
+      ],
+    },
+    steps: [
+      {
+        id: 'step-1',
+        name: 'Step 1',
+        stage: 'main',
+        request: { method: 'GET', url: 'http://localhost/test' },
+      },
+    ],
+  });
+}
+
 // Dynamically import after mocks are set up
 async function createService(dir?: string) {
   const { CatalogService } = await import('../catalog-service.js');
@@ -232,6 +267,30 @@ describe('CatalogService', () => {
       const svc = await loadedService();
       const all = svc.listScenarios();
       expect(all).toHaveLength(3);
+    });
+
+    it('listScenarios filters by FedRAMP compliance metadata', async () => {
+      mockReaddir.mockReturnValue(['ac.json', 'sc.json', 'plain.json'] as any);
+      mockReadFile
+        .mockReturnValueOnce(complianceScenarioJson('ac', 'Access Control', {
+          baseline: 'moderate',
+          controlId: 'AC-3',
+          family: 'AC',
+        }) as any)
+        .mockReturnValueOnce(complianceScenarioJson('sc', 'Cryptographic Protection', {
+          baseline: 'high',
+          controlId: 'SC-13',
+          family: 'SC',
+        }) as any)
+        .mockReturnValueOnce(validScenarioJson('plain', 'Plain Scenario') as any);
+
+      const svc = await createService();
+
+      expect(svc.listScenarios({ framework: 'fedramp' }).map((s) => s.id)).toEqual(['ac', 'sc']);
+      expect(svc.listScenarios({ baseline: 'moderate' }).map((s) => s.id)).toEqual(['ac']);
+      expect(svc.listScenarios({ family: 'SC' }).map((s) => s.id)).toEqual(['sc']);
+      expect(svc.listScenarios({ controlId: 'AC-3' }).map((s) => s.id)).toEqual(['ac']);
+      expect(svc.listScenarios({ family: 'RA' })).toEqual([]);
     });
 
     it('getScenariosByCategory filters correctly', async () => {

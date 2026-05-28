@@ -11,7 +11,7 @@ const HELP = `Usage: crucible-cli [options] <command> [command-options]
 
 Commands:
   health                    Check server health
-  scenarios                 List all scenarios
+  scenarios [filters]       List scenarios
   assess <scenario> [opts]  Run assessment, wait for result
   simulate <scenario>       Start a simulation
   executions [opts]         List executions
@@ -27,6 +27,7 @@ Global Options:
 Examples:
   crucible-cli health
   crucible-cli scenarios
+  crucible-cli scenarios --framework fedramp --baseline moderate --show-controls
   crucible-cli assess my-scenario --fail-below 90
   crucible-cli assess my-scenario --target https://staging.example.com
   crucible-cli simulate my-scenario -t https://prod.example.com
@@ -59,7 +60,7 @@ async function main(): Promise<number> {
     case 'health':
       return healthCommand(client, globals);
     case 'scenarios':
-      return scenariosCommand(client, globals);
+      return scenariosCommand(client, globals, args);
     case 'assess':
       return assessCommand(client, globals, args);
     case 'simulate':

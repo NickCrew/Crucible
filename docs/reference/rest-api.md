@@ -175,16 +175,22 @@ State-machine violations (e.g. pausing a completed execution) return `409` with 
 | `GET` | `/api/reports/:id` | Returns the inline report JSON or the execution if not yet terminal |
 | `GET` | `/api/reports/:id/json` | Downloads the canonical JSON report file |
 | `GET` | `/api/reports/:id/html` | Downloads the HTML report |
+| `GET` | `/api/reports/:id/oscal` | Downloads the OSCAL-shaped FedRAMP evidence JSON export |
 | `GET` | `/api/reports/:id/pdf` | Downloads the PDF report |
-| `GET` | `/api/reports/:id?format=json\|html` | Equivalent to the dedicated suffix endpoints |
+| `GET` | `/api/reports/:id?format=json\|html\|oscal.json` | Equivalent to the dedicated suffix endpoints |
 
 If the report is still being generated, the endpoint responds with `202` and the current execution snapshot.
+
+The OSCAL-shaped export is dynamic assessment evidence only. It includes
+assessment metadata, target URL, FedRAMP control mappings, assertion outcomes,
+and evidence references from Crucible runs; it is not a full FedRAMP
+authorization package.
 
 ## Scenario catalog
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/scenarios` | List all catalog scenarios |
+| `GET` | `/api/scenarios` | List all catalog scenarios; supports `framework`, `baseline`, `family`, and `controlId` filters |
 | `PUT` | `/api/scenarios/:id` | Update an existing catalog scenario; returns `400` on validation failure, `404` if the id is unknown |
 
 ## WebSocket events

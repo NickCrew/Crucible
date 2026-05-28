@@ -94,6 +94,82 @@ export type RunnerFindingSeverity =
   | 'critical'
   | 'unknown';
 
+export type ComplianceFramework = 'fedramp';
+export type FedRampBaseline = 'low' | 'moderate' | 'high' | 'li-saas';
+export type FedRampControlFamily =
+  | 'AC'
+  | 'AT'
+  | 'AU'
+  | 'CA'
+  | 'CM'
+  | 'CP'
+  | 'IA'
+  | 'IR'
+  | 'MA'
+  | 'MP'
+  | 'PE'
+  | 'PL'
+  | 'PM'
+  | 'PS'
+  | 'PT'
+  | 'RA'
+  | 'SA'
+  | 'SC'
+  | 'SI'
+  | 'SR';
+export type FedRampControlId = string;
+export type FedRampEvidenceType =
+  | 'request-response'
+  | 'audit-log'
+  | 'auth-token'
+  | 'session-cookie'
+  | 'tenant-fixture'
+  | 'seeded-resource'
+  | 'config-state'
+  | 'runner-artifact'
+  | 'tls-handshake'
+  | 'openapi-operation';
+export type ComplianceImplementationStatus = 'planned' | 'partial' | 'implemented' | 'manual' | 'deferred';
+
+export interface ComplianceEvidenceMapping {
+  type: FedRampEvidenceType;
+  stepId?: string;
+  description?: string;
+}
+
+export interface FedRampEndpointReference {
+  method: Request['method'];
+  path: string;
+  fedrampAssertion: string;
+}
+
+export interface FedRampComplianceMapping {
+  framework: 'fedramp';
+  revision: 'rev5';
+  baseline: FedRampBaseline;
+  controlId: FedRampControlId;
+  family: FedRampControlFamily;
+  evidenceTypes: FedRampEvidenceType[];
+  assertion: string;
+  rationale: string;
+  implementationStatus: ComplianceImplementationStatus;
+  endpoint?: FedRampEndpointReference;
+  evidence?: ComplianceEvidenceMapping[];
+}
+
+export type ComplianceMapping = FedRampComplianceMapping;
+
+export interface ScenarioCompliance {
+  mappings: ComplianceMapping[];
+}
+
+export interface ListScenariosParams {
+  framework?: ComplianceFramework;
+  baseline?: FedRampBaseline;
+  family?: FedRampControlFamily;
+  controlId?: FedRampControlId;
+}
+
 export interface NucleiStepRunner {
   templateRef?: string;
   workflowRef?: string;
@@ -149,6 +225,7 @@ export interface Scenario {
   version?: number;
   tags?: string[];
   rule_ids?: string[];
+  compliance?: ScenarioCompliance;
   target?: string;
   sourceIp?: string;
   kind?: string;
@@ -410,7 +487,7 @@ export interface AssessmentStartOptions {
 // ── Report options ──────────────────────────────────────────────────
 
 export interface GetReportOptions {
-  format?: 'json' | 'html';
+  format?: 'json' | 'html' | 'oscal.json';
 }
 
 // ── Socket options ──────────────────────────────────────────────────

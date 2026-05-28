@@ -45,6 +45,58 @@ describe('CrucibleClient', () => {
       expect(fetch).toHaveBeenCalledWith('http://localhost:3000/api/scenarios', expect.objectContaining({ method: 'GET' }));
     });
 
+    it('list() encodes FedRAMP discovery query params', async () => {
+      fetch = mockFetch([]);
+      client = new CrucibleClient({ baseUrl: 'http://localhost:3000', fetch });
+
+      await client.scenarios.list({
+        framework: 'fedramp',
+        baseline: 'moderate',
+        family: 'AC',
+        controlId: 'AC-3',
+      });
+
+      const calledUrl = fetch.mock.calls[0][0] as string;
+      const url = new URL(calledUrl);
+      expect(url.pathname).toBe('/api/scenarios');
+      expect(url.searchParams.get('framework')).toBe('fedramp');
+      expect(url.searchParams.get('baseline')).toBe('moderate');
+      expect(url.searchParams.get('family')).toBe('AC');
+      expect(url.searchParams.get('controlId')).toBe('AC-3');
+    });
+
+    it('list() only includes supplied FedRAMP discovery query params', async () => {
+      fetch = mockFetch([]);
+      client = new CrucibleClient({ baseUrl: 'http://localhost:3000', fetch });
+
+      await client.scenarios.list({
+        framework: 'fedramp',
+        controlId: 'AC-3',
+      });
+
+      const calledUrl = fetch.mock.calls[0][0] as string;
+      const url = new URL(calledUrl);
+      expect(url.searchParams.get('framework')).toBe('fedramp');
+      expect(url.searchParams.get('controlId')).toBe('AC-3');
+      expect(url.searchParams.has('baseline')).toBe(false);
+      expect(url.searchParams.has('family')).toBe(false);
+    });
+
+    it('list() supports relative API base URLs with FedRAMP discovery query params', async () => {
+      fetch = mockFetch([]);
+      client = new CrucibleClient({ baseUrl: '/proxy', fetch });
+
+      await client.scenarios.list({
+        framework: 'fedramp',
+        baseline: 'moderate',
+      });
+
+      expect(fetch).toHaveBeenCalledWith(
+        '/proxy/api/scenarios?framework=fedramp&baseline=moderate',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
     it('update() calls PUT /api/scenarios/:id', async () => {
       const scenario = { id: 's1', name: 'Updated', steps: [] };
       fetch = mockFetch(scenario);
@@ -55,6 +107,20 @@ describe('CrucibleClient', () => {
       expect(fetch).toHaveBeenCalledWith(
         'http://localhost:3000/api/scenarios/s1',
         expect.objectContaining({ method: 'PUT', body: JSON.stringify(scenario) }),
+      );
+    });
+  });
+
+  describe('reports', () => {
+    it('oscal() downloads the OSCAL-shaped evidence export', async () => {
+      fetch = mockFetch({});
+      client = new CrucibleClient({ baseUrl: 'http://localhost:3000', fetch });
+
+      await client.reports.oscal('exec/1?#2');
+
+      expect(fetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/reports/exec%2F1%3F%232/oscal',
+        expect.any(Object),
       );
     });
   });

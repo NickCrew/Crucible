@@ -1,0 +1,96 @@
+{
+  "id": "chimera-fedramp-au-audit-suppression",
+  "name": "Chimera FedRAMP AU Audit Suppression Evidence",
+  "description": "Audit suppression attempt with vulnerable and strict comparison paths for FedRAMP AU evidence.",
+  "category": "Audit Tampering",
+  "difficulty": "Advanced",
+  "tags": ["chimera", "fedramp", "audit", "audit-suppression", "configuration"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "fedramp",
+        "revision": "rev5",
+        "baseline": "moderate",
+        "controlId": "AU-6",
+        "family": "AU",
+        "evidenceTypes": ["request-response", "audit-log", "config-state"],
+        "assertion": "audit-suppression-is-denied-and-logged",
+        "rationale": "Audit suppression attempts exercise audit review, event traceability, and tamper-resistance evidence.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "POST",
+          "path": "/api/v1/admin/audit/suspend",
+          "fedrampAssertion": "deny-audit-suspension"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "attempt-vulnerable-audit-suspension",
+            "description": "Vulnerable mode demonstrates the audit suppression failure mode."
+          },
+          {
+            "type": "audit-log",
+            "stepId": "attempt-strict-audit-suspension",
+            "description": "Strict mode records a deny decision with deterministic log ID."
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "attempt-vulnerable-audit-suspension",
+      "name": "Attempt Audit Suspension",
+      "stage": "exploitation",
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/admin/audit/suspend",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "duration_minutes": 15,
+          "reason": "fedramp scenario suppression attempt",
+          "actor": "fedramp-admin",
+          "suppression_id": "fedramp-audit-suppression-scenario",
+          "log_id": "fedramp-audit-suspend-scenario"
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "status": 200,
+        "bodyContains": "auditing_suspended"
+      }
+    },
+    {
+      "id": "attempt-strict-audit-suspension",
+      "name": "Attempt Strict Audit Suspension",
+      "stage": "verification",
+      "dependsOn": ["attempt-vulnerable-audit-suspension"],
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/admin/audit/suspend",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "duration_minutes": 15,
+          "reason": "fedramp strict suppression comparison",
+          "actor": "fedramp-admin",
+          "strict_mode": true,
+          "suppression_id": "fedramp-audit-suppression-scenario",
+          "log_id": "fedramp-audit-suspend-scenario-strict"
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "status": 403,
+        "bodyContains": "deny-audit-suspension"
+      }
+    }
+  ]
+}

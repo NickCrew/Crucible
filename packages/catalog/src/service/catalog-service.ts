@@ -1,7 +1,12 @@
 import { readFileSync, readdirSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { ScenarioSchema, type Scenario } from '../models/types.js';
+import {
+  ScenarioSchema,
+  filterScenariosByCompliance,
+  type Scenario,
+  type ScenarioComplianceFilter,
+} from '../models/types.js';
 import { validateScenario } from '../validation/scenario-validator.js';
 
 /**
@@ -59,8 +64,9 @@ export class CatalogService {
     }
   }
 
-  listScenarios(): Scenario[] {
-    return Array.from(this.scenarios.values());
+  listScenarios(filter?: ScenarioComplianceFilter): Scenario[] {
+    const scenarios = Array.from(this.scenarios.values());
+    return filter ? filterScenariosByCompliance(scenarios, filter) : scenarios;
   }
 
   getScenario(id: string): Scenario | undefined {

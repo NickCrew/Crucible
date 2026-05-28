@@ -15,6 +15,7 @@ function makeClient(executionOverrides: Record<string, unknown> = {}) {
     mode: 'assessment',
     reportUrl: '/api/reports/exec-1',
   });
+  const list = vi.fn().mockResolvedValue([]);
   const get = vi.fn().mockResolvedValue({
     id: 'exec-1',
     scenarioId: 'scenario-1',
@@ -27,11 +28,13 @@ function makeClient(executionOverrides: Record<string, unknown> = {}) {
   });
   return {
     client: {
+      scenarios: { list },
       assessments: { start },
       executions: { get },
     } as unknown as CrucibleClient,
     start,
     get,
+    list,
   };
 }
 
@@ -156,6 +159,40 @@ describe('assessCommand', () => {
     expect(json.results[0].steps[0].runner.artifacts).toEqual([
       '/api/reports/exec-1/artifacts/load/summary.json',
     ]);
+  });
+
+  it('includes concise FedRAMP control summaries when scenario metadata is available', async () => {
+    const tableGlobals: GlobalOptions = { ...globals, format: 'table' };
+    const { client, list } = makeClient();
+    list.mockResolvedValueOnce([
+      {
+        id: 'scenario-1',
+        name: 'FedRAMP AC',
+        steps: [],
+        compliance: {
+          mappings: [
+            {
+              framework: 'fedramp',
+              revision: 'rev5',
+              baseline: 'moderate',
+              controlId: 'AC-3',
+              family: 'AC',
+              evidenceTypes: ['request-response'],
+              assertion: 'tenant-project-access-is-enforced',
+              rationale: 'Cross-tenant access should be denied.',
+              implementationStatus: 'implemented',
+            },
+          ],
+        },
+      },
+    ]);
+
+    const code = await assessCommand(client, tableGlobals, ['scenario-1']);
+
+    expect(code).toBe(0);
+    const out = writeOut.mock.calls.flat().join('');
+    expect(out).toContain('FedRAMP controls:');
+    expect(out).toContain('scenario-1: AC (AC-3)');
   });
 
   it('exits non-zero and prints failed-step block when a runner step fails', async () => {

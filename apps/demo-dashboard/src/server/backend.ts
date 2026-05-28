@@ -5,6 +5,13 @@ import cors from 'cors';
 import express, { type Express, type Request, type Response } from 'express';
 import { config } from 'dotenv';
 import { WebSocketServer } from 'ws';
+import {
+  FedRampBaselineSchema,
+  FedRampComplianceFrameworkSchema,
+  FedRampControlFamilySchema,
+  FedRampControlIdSchema,
+  type ScenarioComplianceFilter,
+} from '@crucible/catalog';
 import { normalizeScenarioTargetUrl, ScenarioTargetUrlError } from '@crucible/catalog/client';
 import { z } from 'zod';
 import { ReportService } from './reports.js';
@@ -142,6 +149,28 @@ const RawAssessmentLaunchRequestSchema = z
 export type SimulationLaunchRequest = z.infer<typeof SimulationLaunchRequestSchema>;
 export type AssessmentLaunchRequest = z.infer<typeof AssessmentLaunchRequestSchema>;
 
+const ScenarioListQuerySchema = z
+  .object({
+    framework: FedRampComplianceFrameworkSchema.optional(),
+    baseline: FedRampBaselineSchema.optional(),
+    family: FedRampControlFamilySchema.optional(),
+    controlId: FedRampControlIdSchema.optional(),
+    control_id: FedRampControlIdSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.controlId && value.control_id && value.controlId !== value.control_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Pass either controlId or control_id, not both.',
+        path: ['controlId'],
+      });
+    }
+  })
+  .transform(({ control_id, ...value }) => ({
+    ...value,
+    controlId: value.controlId ?? control_id,
+  }));
+
 function isScenarioTargetUrlError(error: unknown): boolean {
   return error instanceof ScenarioTargetUrlError;
 }
@@ -175,6 +204,28 @@ export function parseAssessmentLaunchRequest(
   body: unknown,
 ): z.SafeParseReturnType<unknown, AssessmentLaunchRequest> {
   return RawAssessmentLaunchRequestSchema.safeParse(body);
+}
+
+export function parseScenarioListQuery(
+  query: Request['query'],
+): z.SafeParseReturnType<unknown, ScenarioComplianceFilter | undefined> {
+  const raw = {
+    framework: readScenarioListQueryValue(query.framework),
+    baseline: readScenarioListQueryValue(query.baseline),
+    family: readScenarioListQueryValue(query.family),
+    controlId: readScenarioListQueryValue(query.controlId),
+    control_id: readScenarioListQueryValue(query.control_id),
+  };
+
+  if (Object.values(raw).every((value) => value === undefined)) {
+    return { success: true, data: undefined };
+  }
+
+  return ScenarioListQuerySchema.safeParse(raw);
+}
+
+function readScenarioListQueryValue(value: unknown): unknown {
+  return value === '' ? undefined : value;
 }
 
 function formatValidationError(error: z.ZodError) {
@@ -333,8 +384,14 @@ export function attachCrucibleBackend(
     }
   });
 
-  app.get(`${apiBasePath}/scenarios`, (_req, res) => {
-    res.json(catalog.listScenarios());
+  app.get(`${apiBasePath}/scenarios`, (req, res) => {
+    const parsedQuery = parseScenarioListQuery(req.query);
+    if (!parsedQuery.success) {
+      return res.status(400).json(formatValidationError(parsedQuery.error));
+    }
+
+    const listScenarios = catalog.listScenarios as (filter?: ScenarioComplianceFilter) => ReturnType<typeof catalog.listScenarios>;
+    res.json(listScenarios(parsedQuery.data));
   });
 
   app.post(`${apiBasePath}/simulations`, async (req, res) => {
@@ -408,7 +465,9 @@ export function attachCrucibleBackend(
     }
 
     const requestedFormat =
-      req.query.format === ReportService.JSON_SUFFIX || req.query.format === ReportService.HTML_SUFFIX
+      req.query.format === ReportService.JSON_SUFFIX
+        || req.query.format === ReportService.HTML_SUFFIX
+        || req.query.format === ReportService.OSCAL_SUFFIX
         ? req.query.format
         : undefined;
 
@@ -431,6 +490,10 @@ export function attachCrucibleBackend(
 
   app.get(`${apiBasePath}/reports/:id/${ReportService.HTML_SUFFIX}`, (req, res) => {
     return sendReportFile(req.params.id, ReportService.HTML_SUFFIX, res, reportsDir, engine);
+  });
+
+  app.get(`${apiBasePath}/reports/:id/oscal`, (req, res) => {
+    return sendReportFile(req.params.id, ReportService.OSCAL_SUFFIX, res, reportsDir, engine);
   });
 
   app.get(`${apiBasePath}/reports/:id/pdf`, (req, res) => {
@@ -587,7 +650,7 @@ function sendArtifactFile(
 
 function sendReportFile(
   id: string,
-  format: typeof ReportService.JSON_SUFFIX | typeof ReportService.HTML_SUFFIX | 'pdf',
+  format: typeof ReportService.JSON_SUFFIX | typeof ReportService.HTML_SUFFIX | typeof ReportService.OSCAL_SUFFIX | 'pdf',
   res: Response,
   reportsDir: string,
   engine: CrucibleRuntime['engine'],
@@ -607,7 +670,7 @@ function sendReportFile(
 
   if (format === ReportService.HTML_SUFFIX) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  } else if (format === ReportService.JSON_SUFFIX) {
+  } else if (format === ReportService.JSON_SUFFIX || format === ReportService.OSCAL_SUFFIX) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
   } else {
     res.setHeader('Content-Type', 'application/pdf');

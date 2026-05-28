@@ -1,0 +1,88 @@
+{
+  "id": "chimera-fedramp-ia-authenticator-boundary",
+  "name": "Chimera FedRAMP IA Authenticator Boundary",
+  "description": "Authentication and MFA boundary probe using deterministic FedRAMP demo users.",
+  "category": "Broken Authentication",
+  "difficulty": "Intermediate",
+  "tags": ["chimera", "fedramp", "identity", "authentication", "mfa"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "fedramp",
+        "revision": "rev5",
+        "baseline": "moderate",
+        "controlId": "IA-2",
+        "family": "IA",
+        "evidenceTypes": ["request-response", "auth-token", "session-cookie", "audit-log"],
+        "assertion": "mfa-verification-is-required-for-fedramp-user",
+        "rationale": "FedRAMP identity evidence should show that seeded users cannot bypass authenticator verification.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "POST",
+          "path": "/api/v1/auth/verify-mfa",
+          "fedrampAssertion": "mfa-verification-is-required"
+        },
+        "evidence": [
+          {
+            "type": "auth-token",
+            "stepId": "login-fedramp-user",
+            "description": "Seeded FedRAMP user login establishes the identity under assessment."
+          },
+          {
+            "type": "request-response",
+            "stepId": "attempt-invalid-mfa",
+            "description": "Invalid MFA verification should be denied without issuing a session."
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "login-fedramp-user",
+      "name": "Login FedRAMP Demo User",
+      "stage": "authentication",
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/auth/login",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "username": "fedramp-demo-user-a",
+          "password": "fedramp-user-a-password"
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "id": "attempt-invalid-mfa",
+      "name": "Attempt Invalid MFA Verification",
+      "stage": "exploitation",
+      "dependsOn": ["login-fedramp-user"],
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/auth/verify-mfa",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "username": "fedramp-demo-user-a",
+          "code": "000000"
+        }
+      },
+      "execution": {
+        "delayMs": 250
+      },
+      "expect": {
+        "blocked": true,
+        "bodyNotContains": "session_token"
+      }
+    }
+  ]
+}

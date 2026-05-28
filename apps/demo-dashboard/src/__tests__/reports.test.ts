@@ -67,6 +67,7 @@ describe('ReportService', () => {
     expect(content.steps[0].assertions[0].field).toBe('status');
     expect(content.exports.json).toContain(`format=${ReportService.JSON_SUFFIX}`);
     expect(content.exports.html).toContain(`format=${ReportService.HTML_SUFFIX}`);
+    expect(content.exports.oscal).toContain(`format=${ReportService.OSCAL_SUFFIX}`);
   });
 
   it('generates a styled HTML report file', async () => {
@@ -80,6 +81,189 @@ describe('ReportService', () => {
     expect(content).toContain('100%');
     expect(content).toContain('Initial Probe');
     expect(content).toContain('JSON export');
+  });
+
+  it('adds FedRAMP control rollups to JSON, HTML, and OSCAL-shaped exports', async () => {
+    const { jsonPath, htmlPath, oscalPath } = await service.generateReports(
+      {
+        ...mockExecution,
+        steps: [
+          {
+            ...mockExecution.steps[0],
+            stepId: 'cross-tenant',
+            assertions: [{ field: 'blocked', expected: true, actual: true, passed: true }],
+          },
+        ],
+      },
+      {
+        ...mockScenario,
+        id: 'chimera-fedramp-ac-tenant-project-isolation',
+        name: 'FedRAMP AC Tenant Project Isolation',
+        category: 'IDOR',
+        compliance: {
+          mappings: [
+            {
+              framework: 'fedramp',
+              revision: 'rev5',
+              baseline: 'moderate',
+              controlId: 'AC-3',
+              family: 'AC',
+              evidenceTypes: ['request-response', 'tenant-fixture'],
+              assertion: 'tenant-project-access-is-enforced',
+              rationale: 'Cross-tenant access should be denied and auditable.',
+              implementationStatus: 'implemented',
+              endpoint: {
+                method: 'GET',
+                path: '/api/v1/saas/tenants/{tenant_id}/projects',
+                fedrampAssertion: 'tenant-project-access-is-enforced',
+              },
+              evidence: [
+                {
+                  type: 'request-response',
+                  stepId: 'cross-tenant',
+                  description: 'Cross-tenant request response.',
+                },
+              ],
+            },
+          ],
+        },
+        steps: [
+          {
+            id: 'cross-tenant',
+            name: 'Cross tenant probe',
+            request: { method: 'GET', url: '/api/v1/saas/tenants/fedramp-tenant-b/projects' },
+          },
+        ],
+      },
+    );
+
+    const json = JSON.parse(readFileSync(jsonPath, 'utf8'));
+    expect(json.compliance.frameworks.fedramp.counts).toEqual({
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      unknown: 0,
+    });
+    expect(json.compliance.frameworks.fedramp.families[0].family).toBe('AC');
+    expect(json.compliance.frameworks.fedramp.controls[0]).toMatchObject({
+      controlId: 'AC-3',
+      status: 'passed',
+      assertion: 'tenant-project-access-is-enforced',
+    });
+
+    const html = readFileSync(htmlPath, 'utf8');
+    expect(html).toContain('AC-3');
+    expect(html).toContain('tenant-project-access-is-enforced');
+    expect(html).toContain('/api/v1/saas/tenants/{tenant_id}/projects');
+
+    const oscal = JSON.parse(readFileSync(oscalPath, 'utf8'));
+    expect(oscal.profile).toBe('crucible-fedramp-assessment-results-shaped');
+    expect(oscal.results[0].uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(oscal.results[0].observations[0].uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(oscal.results[0].reviewedControls.controlSelections[0].includeControls).toEqual([
+      { controlId: 'AC-3' },
+    ]);
+    expect(oscal.limitations.join(' ')).toContain('not a complete FedRAMP authorization package');
+  });
+
+  it('uses scenario step outcomes for FedRAMP mappings without explicit evidence refs', async () => {
+    const { jsonPath } = await service.generateReports(
+      {
+        ...mockExecution,
+        steps: [
+          {
+            ...mockExecution.steps[0],
+            assertions: [{ field: 'status', expected: 403, actual: 200, passed: false }],
+          },
+        ],
+      },
+      {
+        ...mockScenario,
+        compliance: {
+          mappings: [
+            {
+              framework: 'fedramp',
+              revision: 'rev5',
+              baseline: 'moderate',
+              controlId: 'SC-7',
+              family: 'SC',
+              evidenceTypes: ['request-response'],
+              assertion: 'service-boundary-is-enforced',
+              rationale: 'Unexpected success means the service boundary failed.',
+              implementationStatus: 'partial',
+            },
+          ],
+        },
+      },
+    );
+
+    const json = JSON.parse(readFileSync(jsonPath, 'utf8'));
+    expect(json.compliance.frameworks.fedramp.controls[0]).toMatchObject({
+      controlId: 'SC-7',
+      status: 'failed',
+    });
+    expect(json.compliance.frameworks.fedramp.controls[0].evidence[0]).toMatchObject({
+      type: 'request-response',
+      status: 'completed',
+      assertions: [{ field: 'status', passed: false }],
+    });
+  });
+
+  it('marks a FedRAMP control failed when one evidence ref fails and another is not run', async () => {
+    const { jsonPath } = await service.generateReports(
+      {
+        ...mockExecution,
+        steps: [
+          {
+            ...mockExecution.steps[0],
+            stepId: 'failed-probe',
+            status: 'failed',
+            assertions: [{ field: 'blocked', expected: true, actual: false, passed: false }],
+          },
+        ],
+      },
+      {
+        ...mockScenario,
+        compliance: {
+          mappings: [
+            {
+              framework: 'fedramp',
+              revision: 'rev5',
+              baseline: 'moderate',
+              controlId: 'AC-3',
+              family: 'AC',
+              evidenceTypes: ['request-response'],
+              assertion: 'tenant-project-access-is-enforced',
+              rationale: 'Failed evidence should dominate incomplete evidence.',
+              implementationStatus: 'implemented',
+              evidence: [
+                { type: 'request-response', stepId: 'failed-probe' },
+                { type: 'audit-log', stepId: 'missing-audit-step' },
+              ],
+            },
+          ],
+        },
+        steps: [
+          {
+            id: 'failed-probe',
+            name: 'Failed probe',
+            request: { method: 'GET', url: '/api/v1/saas/tenants/fedramp-tenant-b/projects' },
+          },
+        ],
+      },
+    );
+
+    const json = JSON.parse(readFileSync(jsonPath, 'utf8'));
+    expect(json.compliance.frameworks.fedramp.counts).toEqual({
+      passed: 0,
+      failed: 1,
+      skipped: 0,
+      unknown: 0,
+    });
+    expect(json.compliance.frameworks.fedramp.controls[0]).toMatchObject({
+      controlId: 'AC-3',
+      status: 'failed',
+    });
   });
 
   it('renders failed assertion details, nullish values, and second-based durations in HTML', async () => {
