@@ -68,6 +68,40 @@ function complianceScenarioJson(
   });
 }
 
+function hipaaComplianceScenarioJson(
+  id: string,
+  name: string,
+  mapping: { citation: string; safeguard: string },
+) {
+  return JSON.stringify({
+    id,
+    name,
+    category: 'Compliance',
+    compliance: {
+      mappings: [
+        {
+          framework: 'hipaa',
+          citation: mapping.citation,
+          controlId: mapping.citation,
+          safeguard: mapping.safeguard,
+          evidenceTypes: ['request-response'],
+          assertion: `${id}-assertion`,
+          rationale: 'Collects scenario evidence for HIPAA technical safeguard mapping tests.',
+          implementationStatus: 'implemented',
+        },
+      ],
+    },
+    steps: [
+      {
+        id: 'step-1',
+        name: 'Step 1',
+        stage: 'main',
+        request: { method: 'GET', url: 'http://localhost/test' },
+      },
+    ],
+  });
+}
+
 // Dynamically import after mocks are set up
 async function createService(dir?: string) {
   const { CatalogService } = await import('../catalog-service.js');
@@ -291,6 +325,28 @@ describe('CatalogService', () => {
       expect(svc.listScenarios({ family: 'SC' }).map((s) => s.id)).toEqual(['sc']);
       expect(svc.listScenarios({ controlId: 'AC-3' }).map((s) => s.id)).toEqual(['ac']);
       expect(svc.listScenarios({ family: 'RA' })).toEqual([]);
+    });
+
+    it('listScenarios filters by HIPAA compliance metadata', async () => {
+      mockReaddir.mockReturnValue(['audit.json', 'access.json', 'plain.json'] as any);
+      mockReadFile
+        .mockReturnValueOnce(hipaaComplianceScenarioJson('audit', 'Audit Controls', {
+          citation: '164.312(b)',
+          safeguard: 'audit-controls',
+        }) as any)
+        .mockReturnValueOnce(hipaaComplianceScenarioJson('access', 'Access Control', {
+          citation: '164.312(a)(1)',
+          safeguard: 'access-control',
+        }) as any)
+        .mockReturnValueOnce(validScenarioJson('plain', 'Plain Scenario') as any);
+
+      const svc = await createService();
+
+      expect(svc.listScenarios({ framework: 'hipaa' }).map((s) => s.id)).toEqual(['audit', 'access']);
+      expect(svc.listScenarios({ citation: '164.312(b)' }).map((s) => s.id)).toEqual(['audit']);
+      expect(svc.listScenarios({ controlId: '164.312(a)(1)' }).map((s) => s.id)).toEqual(['access']);
+      expect(svc.listScenarios({ safeguard: 'audit-controls' }).map((s) => s.id)).toEqual(['audit']);
+      expect(svc.listScenarios({ framework: 'hipaa', baseline: 'moderate' })).toEqual([]);
     });
 
     it('getScenariosByCategory filters correctly', async () => {

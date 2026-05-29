@@ -216,6 +216,100 @@ describe('backend scenario list query parsing', () => {
     expect(result.data?.controlId).toBe('SC-13');
   });
 
+  it('normalizes HIPAA scenario discovery filters', () => {
+    const result = parseScenarioListQuery({
+      framework: 'hipaa',
+      citation: '164.312(b)',
+      control_id: '164.312(b)',
+      safeguard: 'audit-controls',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    expect(result.data).toEqual({
+      framework: 'hipaa',
+      citation: '164.312(b)',
+      safeguard: 'audit-controls',
+      controlId: '164.312(b)',
+    });
+  });
+
+  it('rejects FedRAMP filters on HIPAA scenario discovery', () => {
+    const result = parseScenarioListQuery({
+      framework: 'hipaa',
+      baseline: 'moderate',
+      family: 'AC',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+
+    expect(result.error.issues.map((issue) => issue.path.join('.'))).toEqual(
+      expect.arrayContaining(['baseline', 'family']),
+    );
+  });
+
+  it('rejects HIPAA filters on FedRAMP scenario discovery', () => {
+    const result = parseScenarioListQuery({
+      framework: 'fedramp',
+      citation: '164.312(b)',
+      safeguard: 'audit-controls',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+
+    expect(result.error.issues.map((issue) => issue.path.join('.'))).toEqual(
+      expect.arrayContaining(['citation', 'safeguard']),
+    );
+  });
+
+  it('rejects mixed FedRAMP and HIPAA filters without a framework', () => {
+    const result = parseScenarioListQuery({
+      baseline: 'moderate',
+      citation: '164.312(b)',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+
+    expect(result.error.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: ['framework'],
+          message: expect.stringContaining('Do not mix FedRAMP baseline/family filters with HIPAA citation/safeguard filters'),
+        }),
+      ]),
+    );
+  });
+
+  it('rejects invalid HIPAA scenario discovery filters', () => {
+    const result = parseScenarioListQuery({
+      framework: 'hipaa',
+      citation: '164.312(z)',
+      safeguard: 'fake-safeguard',
+      controlId: '164.312(z)',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+
+    expect(result.error.issues.map((issue) => issue.path.join('.'))).toEqual(
+      expect.arrayContaining(['citation', 'safeguard', 'controlId']),
+    );
+  });
+
   it('rejects invalid FedRAMP scenario discovery filters', () => {
     const result = parseScenarioListQuery({
       framework: 'fedramp',

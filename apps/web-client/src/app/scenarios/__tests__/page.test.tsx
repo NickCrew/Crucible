@@ -86,6 +86,30 @@ function makeFedRampScenario(overrides: Record<string, unknown> = {}) {
   });
 }
 
+function makeHipaaScenario(overrides: Record<string, unknown> = {}) {
+  return makeScenario({
+    id: 'compliance-hipaa-audit-suppression',
+    name: 'HIPAA Audit Suppression Probe',
+    category: 'Compliance',
+    tags: ['hipaa', 'healthcare'],
+    compliance: {
+      mappings: [
+        {
+          framework: 'hipaa',
+          citation: '164.312(b)',
+          controlId: '164.312(b)',
+          safeguard: 'audit-controls',
+          evidenceTypes: ['audit-log'],
+          assertion: 'phi-export-remains-auditable',
+          rationale: 'PHI export attempts should remain auditable.',
+          implementationStatus: 'implemented',
+        },
+      ],
+    },
+    ...overrides,
+  });
+}
+
 describe('ScenariosPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -190,6 +214,99 @@ describe('ScenariosPage', () => {
     expect(screen.getByText('FedRAMP Cross-Tenant Data Leakage Probe')).toBeDefined();
     expect(screen.queryByText('FedRAMP Non-FIPS Cipher Negotiation Probe')).toBeNull();
     expect(screen.getByText('AC-3 moderate')).toBeDefined();
+  });
+
+  it('filters scenarios by HIPAA framework, citation, and safeguard', () => {
+    mockState.scenarios = [
+      makeFedRampScenario(),
+      makeHipaaScenario(),
+      makeHipaaScenario({
+        id: 'compliance-hipaa-emergency-access',
+        name: 'HIPAA Emergency Access Probe',
+        compliance: {
+          mappings: [
+            {
+              framework: 'hipaa',
+              citation: '164.312(a)(1)',
+              controlId: '164.312(a)(1)',
+              safeguard: 'access-control',
+              evidenceTypes: ['request-response'],
+              assertion: 'emergency-access-requires-justification',
+              rationale: 'Emergency access should require justification.',
+              implementationStatus: 'implemented',
+            },
+          ],
+        },
+      }),
+    ];
+
+    render(<ScenariosPage />);
+
+    fireEvent.change(screen.getByLabelText(/framework filter/i), { target: { value: 'hipaa' } });
+    expect(screen.getByText('HIPAA Audit Suppression Probe')).toBeDefined();
+    expect(screen.getByText('HIPAA Emergency Access Probe')).toBeDefined();
+    expect(screen.queryByText('FedRAMP Cross-Tenant Data Leakage Probe')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/hipaa citation filter/i), { target: { value: '164.312(b)' } });
+    fireEvent.change(screen.getByLabelText(/hipaa safeguard filter/i), { target: { value: 'audit-controls' } });
+
+    expect(screen.getByText('HIPAA Audit Suppression Probe')).toBeDefined();
+    expect(screen.queryByText('HIPAA Emergency Access Probe')).toBeNull();
+    expect(screen.getByText('164.312(b) audit-controls')).toBeDefined();
+  });
+
+  it('filters HIPAA citations from the all-framework control input', () => {
+    mockState.scenarios = [
+      makeFedRampScenario(),
+      makeHipaaScenario(),
+    ];
+
+    render(<ScenariosPage />);
+
+    fireEvent.change(screen.getByLabelText(/compliance control id or citation filter/i), {
+      target: { value: '164.312(b)' },
+    });
+
+    expect(screen.getByText('HIPAA Audit Suppression Probe')).toBeDefined();
+    expect(screen.queryByText('FedRAMP Cross-Tenant Data Leakage Probe')).toBeNull();
+  });
+
+  it('clears framework-specific filters when switching frameworks', () => {
+    mockState.scenarios = [
+      makeFedRampScenario(),
+      makeHipaaScenario(),
+    ];
+
+    render(<ScenariosPage />);
+
+    fireEvent.change(screen.getByLabelText(/framework filter/i), { target: { value: 'fedramp' } });
+    fireEvent.change(screen.getByLabelText(/fedramp baseline filter/i), { target: { value: 'moderate' } });
+    expect(screen.getByText('FedRAMP Cross-Tenant Data Leakage Probe')).toBeDefined();
+    expect(screen.queryByText('HIPAA Audit Suppression Probe')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/framework filter/i), { target: { value: 'hipaa' } });
+    expect(screen.getByText('HIPAA Audit Suppression Probe')).toBeDefined();
+    expect(screen.queryByText('FedRAMP Cross-Tenant Data Leakage Probe')).toBeNull();
+    expect(screen.getByLabelText(/fedramp baseline filter/i)).toHaveProperty('value', 'all');
+  });
+
+  it('searches HIPAA citation and safeguard metadata', () => {
+    mockState.scenarios = [
+      makeScenario({ id: 'plain-auth', name: 'Plain Auth', category: 'auth' }),
+      makeHipaaScenario(),
+    ];
+
+    render(<ScenariosPage />);
+
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'audit-controls' } });
+
+    expect(screen.getByText('HIPAA Audit Suppression Probe')).toBeDefined();
+    expect(screen.queryByText('Plain Auth')).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: '164.312(b)' } });
+
+    expect(screen.getByText('HIPAA Audit Suppression Probe')).toBeDefined();
+    expect(screen.queryByText('Plain Auth')).toBeNull();
   });
 
   it('filters scenarios by tag', () => {

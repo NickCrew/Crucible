@@ -12,6 +12,11 @@ import {
   ScenarioTargetUrlError,
 } from "@crucible/catalog/client"
 import type {
+  FedRampBaseline,
+  FedRampControlFamily,
+  FedRampControlId,
+  HipaaCitation,
+  HipaaSafeguard,
   Scenario,
   ScenarioTargetCompatibility,
   ScenarioTargetFamily,
@@ -52,16 +57,23 @@ const FEDRAMP_CONTROL_FAMILIES = [
   "SI",
   "SR",
 ] as const
+const HIPAA_SAFEGUARDS = [
+  "access-control",
+  "audit-controls",
+  "integrity",
+  "person-or-entity-authentication",
+  "transmission-security",
+] as const
 
-type FedRampBaseline = (typeof FEDRAMP_BASELINES)[number]
-type FedRampControlFamily = (typeof FEDRAMP_CONTROL_FAMILIES)[number]
-type FedRampControlId = string
+type ComplianceFramework = "fedramp" | "hipaa"
 
 interface ScenarioComplianceFilter {
-  framework?: "fedramp"
+  framework?: ComplianceFramework
   baseline?: FedRampBaseline
   family?: FedRampControlFamily
   controlId?: FedRampControlId
+  citation?: HipaaCitation
+  safeguard?: HipaaSafeguard
 }
 
 interface LaunchDialogState {
@@ -84,10 +96,11 @@ interface ScenarioCatalogEntry {
 }
 
 interface ComplianceFilterState {
-  framework: typeof ALL_FILTER_VALUE | "fedramp"
+  framework: typeof ALL_FILTER_VALUE | ComplianceFramework
   baseline: typeof ALL_FILTER_VALUE | FedRampBaseline
   family: typeof ALL_FILTER_VALUE | FedRampControlFamily
   controlId: string
+  safeguard: typeof ALL_FILTER_VALUE | HipaaSafeguard
 }
 
 export default function ScenariosPage() {
@@ -110,6 +123,7 @@ export default function ScenariosPage() {
     baseline: ALL_FILTER_VALUE,
     family: ALL_FILTER_VALUE,
     controlId: "",
+    safeguard: ALL_FILTER_VALUE,
   })
   const [launchDialog, setLaunchDialog] = useState<LaunchDialogState | null>(null)
   const [launchError, setLaunchError] = useState<string | null>(null)
@@ -128,13 +142,31 @@ export default function ScenariosPage() {
     )))).sort(),
     [scenarios],
   )
+  const hipaaCitations = useMemo(
+    () => Array.from(new Set(scenarios.flatMap((scenario) => (
+      scenario.compliance?.mappings
+        .filter((mapping) => mapping.framework === "hipaa")
+        .map((mapping) => mapping.citation) ?? []
+    )))).sort(),
+    [scenarios],
+  )
+  const complianceControlOptions = useMemo(
+    () => Array.from(new Set([...fedRampControlIds, ...hipaaCitations])).sort(),
+    [fedRampControlIds, hipaaCitations],
+  )
   const activeComplianceFilter = useMemo(() => {
-    const controlId = complianceFilters.controlId.trim().toUpperCase()
+    const isHipaaFilter = complianceFilters.framework === "hipaa"
+    const controlId = normalizeComplianceControlInput(complianceFilters.controlId)
     const filter = {
       ...(complianceFilters.framework !== ALL_FILTER_VALUE ? { framework: complianceFilters.framework } : {}),
-      ...(complianceFilters.baseline !== ALL_FILTER_VALUE ? { baseline: complianceFilters.baseline } : {}),
-      ...(complianceFilters.family !== ALL_FILTER_VALUE ? { family: complianceFilters.family } : {}),
-      ...(controlId ? { controlId: controlId as FedRampControlId } : {}),
+      ...(!isHipaaFilter && complianceFilters.baseline !== ALL_FILTER_VALUE ? { baseline: complianceFilters.baseline } : {}),
+      ...(!isHipaaFilter && complianceFilters.family !== ALL_FILTER_VALUE ? { family: complianceFilters.family } : {}),
+      ...(controlId ? (
+        isHipaaFilter
+          ? { citation: controlId as HipaaCitation }
+          : { controlId: controlId as FedRampControlId }
+      ) : {}),
+      ...(isHipaaFilter && complianceFilters.safeguard !== ALL_FILTER_VALUE ? { safeguard: complianceFilters.safeguard } : {}),
     }
 
     return Object.keys(filter).length > 0 ? filter : null
@@ -144,6 +176,8 @@ export default function ScenariosPage() {
     selectedCategory !== ALL_FILTER_VALUE ||
     activeComplianceFilter,
   )
+  const isHipaaFrameworkSelected = complianceFilters.framework === "hipaa"
+  const isFedRampFrameworkSelected = complianceFilters.framework === "fedramp"
 
   useEffect(() => {
     fetchScenarios()
@@ -171,11 +205,7 @@ export default function ScenariosPage() {
           s.description?.toLowerCase().includes(q) ||
           s.category?.toLowerCase().includes(q) ||
           s.tags?.some((t) => t.toLowerCase().includes(q)) ||
-          s.compliance?.mappings.some((mapping) => (
-            mapping.controlId.toLowerCase().includes(q) ||
-            mapping.family.toLowerCase().includes(q) ||
-            mapping.baseline.toLowerCase().includes(q)
-          ))
+          s.compliance?.mappings.some((mapping) => getComplianceSearchTerms(mapping).some((term) => term.includes(q)))
         )
       })
       .map((scenario) => ({
@@ -317,7 +347,7 @@ export default function ScenariosPage() {
         </div>
       )}
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1.5fr)_repeat(5,minmax(8rem,1fr))_auto]">
+      <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1.5fr)_repeat(6,minmax(8rem,1fr))_auto]">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -345,15 +375,20 @@ export default function ScenariosPage() {
           onChange={(event) => setComplianceFilters((current) => ({
             ...current,
             framework: event.target.value as ComplianceFilterState["framework"],
+            baseline: event.target.value === "fedramp" ? current.baseline : ALL_FILTER_VALUE,
+            family: event.target.value === "fedramp" ? current.family : ALL_FILTER_VALUE,
+            safeguard: event.target.value === "hipaa" ? current.safeguard : ALL_FILTER_VALUE,
           }))}
           className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <option value={ALL_FILTER_VALUE}>All frameworks</option>
           <option value="fedramp">FedRAMP</option>
+          <option value="hipaa">HIPAA</option>
         </select>
         <select
           aria-label="FedRAMP baseline filter"
           value={complianceFilters.baseline}
+          disabled={!isFedRampFrameworkSelected}
           onChange={(event) => setComplianceFilters((current) => ({
             ...current,
             baseline: event.target.value as ComplianceFilterState["baseline"],
@@ -368,6 +403,7 @@ export default function ScenariosPage() {
         <select
           aria-label="FedRAMP family filter"
           value={complianceFilters.family}
+          disabled={!isFedRampFrameworkSelected}
           onChange={(event) => setComplianceFilters((current) => ({
             ...current,
             family: event.target.value as ComplianceFilterState["family"],
@@ -380,9 +416,9 @@ export default function ScenariosPage() {
           ))}
         </select>
         <Input
-          aria-label="FedRAMP control ID filter"
-          list="fedramp-control-options"
-          placeholder="Control ID"
+          aria-label={getComplianceControlInputLabel(complianceFilters.framework)}
+          list={getComplianceControlDatalistId(complianceFilters.framework)}
+          placeholder={getComplianceControlInputPlaceholder(complianceFilters.framework)}
           value={complianceFilters.controlId}
           onChange={(event) => setComplianceFilters((current) => ({
             ...current,
@@ -394,6 +430,31 @@ export default function ScenariosPage() {
             <option key={controlId} value={controlId} />
           ))}
         </datalist>
+        <datalist id="compliance-control-options">
+          {complianceControlOptions.map((controlId) => (
+            <option key={controlId} value={controlId} />
+          ))}
+        </datalist>
+        <datalist id="hipaa-citation-options">
+          {hipaaCitations.map((citation) => (
+            <option key={citation} value={citation} />
+          ))}
+        </datalist>
+        <select
+          aria-label="HIPAA safeguard filter"
+          value={complianceFilters.safeguard}
+          disabled={!isHipaaFrameworkSelected}
+          onChange={(event) => setComplianceFilters((current) => ({
+            ...current,
+            safeguard: event.target.value as ComplianceFilterState["safeguard"],
+          }))}
+          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <option value={ALL_FILTER_VALUE}>All safeguards</option>
+          {HIPAA_SAFEGUARDS.map((safeguard) => (
+            <option key={safeguard} value={safeguard}>{safeguard}</option>
+          ))}
+        </select>
         {hasActiveFilters && (
           <Button
             type="button"
@@ -406,6 +467,7 @@ export default function ScenariosPage() {
                 baseline: ALL_FILTER_VALUE,
                 family: ALL_FILTER_VALUE,
                 controlId: "",
+                safeguard: ALL_FILTER_VALUE,
               })
             }}
           >
@@ -690,11 +752,10 @@ const ScenarioCatalogCard = memo(function ScenarioCatalogCard({
         </div>
         <div className="mt-4 flex flex-wrap gap-1.5">
           {scenario.compliance?.mappings
-            .filter((mapping) => mapping.framework === "fedramp")
             .slice(0, 3)
             .map((mapping) => (
-              <Badge key={`${mapping.controlId}-${mapping.baseline}`} variant="secondary" className="type-tag">
-                {mapping.controlId} {mapping.baseline}
+              <Badge key={getComplianceBadgeKey(mapping)} variant="secondary" className="type-tag">
+                {formatComplianceBadge(mapping)}
               </Badge>
             ))}
           {targetFamily !== "unknown" && targetFamily !== "generic" && (
@@ -765,18 +826,113 @@ function scenarioMatchesCompliance(scenario: Scenario, filter: ScenarioComplianc
     if (filter.framework && mapping.framework !== filter.framework) {
       return false
     }
-    if (filter.baseline && mapping.baseline !== filter.baseline) {
-      return false
+
+    if (mapping.framework === "fedramp") {
+      if (filter.citation || filter.safeguard) {
+        return false
+      }
+      if (filter.baseline && mapping.baseline !== filter.baseline) {
+        return false
+      }
+      if (filter.family && mapping.family !== filter.family) {
+        return false
+      }
+      if (filter.controlId && mapping.controlId !== filter.controlId) {
+        return false
+      }
+      return true
     }
-    if (filter.family && mapping.family !== filter.family) {
-      return false
-    }
-    if (filter.controlId && mapping.controlId !== filter.controlId) {
-      return false
+
+    if (mapping.framework === "hipaa") {
+      if (filter.baseline || filter.family) {
+        return false
+      }
+      if (filter.citation && mapping.citation !== filter.citation) {
+        return false
+      }
+      if (filter.safeguard && mapping.safeguard !== filter.safeguard) {
+        return false
+      }
+      if (filter.controlId && mapping.controlId !== filter.controlId && mapping.citation !== filter.controlId) {
+        return false
+      }
+      return true
     }
 
     return true
   })
+}
+
+type ScenarioComplianceMapping = NonNullable<Scenario["compliance"]>["mappings"][number]
+
+function getComplianceSearchTerms(mapping: ScenarioComplianceMapping): string[] {
+  if (mapping.framework === "fedramp") {
+    return [mapping.framework, mapping.controlId, mapping.family, mapping.baseline]
+      .filter(Boolean)
+      .map((term) => term.toLowerCase())
+  }
+
+  return [
+    mapping.framework,
+    mapping.citation,
+    mapping.controlId ?? "",
+    mapping.safeguard,
+  ].filter(Boolean).map((term) => term.toLowerCase())
+}
+
+function normalizeComplianceControlInput(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ""
+  }
+
+  return /^[a-z]{2}-/i.test(trimmed) ? trimmed.toUpperCase() : trimmed
+}
+
+function getComplianceControlInputLabel(framework: ComplianceFilterState["framework"]): string {
+  if (framework === "hipaa") {
+    return "HIPAA citation filter"
+  }
+  if (framework === "fedramp") {
+    return "FedRAMP control ID filter"
+  }
+  return "Compliance control ID or citation filter"
+}
+
+function getComplianceControlInputPlaceholder(framework: ComplianceFilterState["framework"]): string {
+  if (framework === "hipaa") {
+    return "Citation"
+  }
+  if (framework === "fedramp") {
+    return "Control ID"
+  }
+  return "Control ID / citation"
+}
+
+function getComplianceControlDatalistId(framework: ComplianceFilterState["framework"]): string {
+  if (framework === "hipaa") {
+    return "hipaa-citation-options"
+  }
+  if (framework === "fedramp") {
+    return "fedramp-control-options"
+  }
+  return "compliance-control-options"
+}
+
+function getComplianceBadgeKey(mapping: ScenarioComplianceMapping): string {
+  if (mapping.framework === "fedramp") {
+    return `${mapping.framework}-${mapping.controlId}-${mapping.baseline}`
+  }
+
+  return `${mapping.framework}-${mapping.citation}-${mapping.safeguard}`
+}
+
+function formatComplianceBadge(mapping: ScenarioComplianceMapping): string {
+  if (mapping.framework === "fedramp") {
+    return `${mapping.controlId} ${mapping.baseline}`
+  }
+
+  return `${mapping.citation} ${mapping.safeguard}`
 }
 
 function validateLaunchTargetInput(value: string): LaunchTargetState {

@@ -6,10 +6,12 @@ import express, { type Express, type Request, type Response } from 'express';
 import { config } from 'dotenv';
 import { WebSocketServer } from 'ws';
 import {
+  ComplianceFrameworkSchema,
   FedRampBaselineSchema,
-  FedRampComplianceFrameworkSchema,
   FedRampControlFamilySchema,
   FedRampControlIdSchema,
+  HipaaCitationSchema,
+  HipaaSafeguardSchema,
   type ScenarioComplianceFilter,
 } from '@crucible/catalog';
 import { normalizeScenarioTargetUrl, ScenarioTargetUrlError } from '@crucible/catalog/client';
@@ -151,11 +153,13 @@ export type AssessmentLaunchRequest = z.infer<typeof AssessmentLaunchRequestSche
 
 const ScenarioListQuerySchema = z
   .object({
-    framework: FedRampComplianceFrameworkSchema.optional(),
+    framework: ComplianceFrameworkSchema.optional(),
     baseline: FedRampBaselineSchema.optional(),
     family: FedRampControlFamilySchema.optional(),
-    controlId: FedRampControlIdSchema.optional(),
-    control_id: FedRampControlIdSchema.optional(),
+    controlId: z.union([FedRampControlIdSchema, HipaaCitationSchema]).optional(),
+    control_id: z.union([FedRampControlIdSchema, HipaaCitationSchema]).optional(),
+    citation: HipaaCitationSchema.optional(),
+    safeguard: HipaaSafeguardSchema.optional(),
   })
   .superRefine((value, ctx) => {
     if (value.controlId && value.control_id && value.controlId !== value.control_id) {
@@ -163,6 +167,41 @@ const ScenarioListQuerySchema = z
         code: z.ZodIssueCode.custom,
         message: 'Pass either controlId or control_id, not both.',
         path: ['controlId'],
+      });
+    }
+    if (value.framework === 'fedramp' && value.citation) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'citation is only supported with framework=hipaa.',
+        path: ['citation'],
+      });
+    }
+    if (value.framework === 'fedramp' && value.safeguard) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'safeguard is only supported with framework=hipaa.',
+        path: ['safeguard'],
+      });
+    }
+    if (value.framework === 'hipaa' && value.baseline) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'baseline is only supported with framework=fedramp.',
+        path: ['baseline'],
+      });
+    }
+    if (value.framework === 'hipaa' && value.family) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'family is only supported with framework=fedramp.',
+        path: ['family'],
+      });
+    }
+    if ((value.baseline || value.family) && (value.citation || value.safeguard)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Do not mix FedRAMP baseline/family filters with HIPAA citation/safeguard filters.',
+        path: ['framework'],
       });
     }
   })
@@ -215,6 +254,8 @@ export function parseScenarioListQuery(
     family: readScenarioListQueryValue(query.family),
     controlId: readScenarioListQueryValue(query.controlId),
     control_id: readScenarioListQueryValue(query.control_id),
+    citation: readScenarioListQueryValue(query.citation),
+    safeguard: readScenarioListQueryValue(query.safeguard),
   };
 
   if (Object.values(raw).every((value) => value === undefined)) {

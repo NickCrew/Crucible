@@ -41,6 +41,37 @@ function makeClient() {
   };
 }
 
+function makeHipaaClient() {
+  const list = vi.fn().mockResolvedValue([
+    {
+      id: 'compliance-hipaa-audit-suppression',
+      name: 'HIPAA Audit Suppression Probe',
+      category: 'Compliance',
+      difficulty: 'Advanced',
+      compliance: {
+        mappings: [
+          {
+            framework: 'hipaa',
+            citation: '164.312(b)',
+            controlId: '164.312(b)',
+            safeguard: 'audit-controls',
+            evidenceTypes: ['audit-log'],
+            assertion: 'phi-export-remains-auditable',
+            rationale: 'PHI export attempts should remain auditable.',
+            implementationStatus: 'implemented',
+          },
+        ],
+      },
+      steps: [{ id: 's1', name: 'Step 1', stage: 'main', request: { method: 'GET', url: '/' } }],
+    },
+  ]);
+
+  return {
+    client: { scenarios: { list } } as unknown as CrucibleClient,
+    list,
+  };
+}
+
 describe('scenariosCommand', () => {
   let writeOut: ReturnType<typeof vi.spyOn>;
 
@@ -80,6 +111,40 @@ describe('scenariosCommand', () => {
     expect(list).toHaveBeenCalledWith(undefined);
     expect(writeOut.mock.calls.flat().join('')).toContain('controls');
     expect(writeOut.mock.calls.flat().join('')).toContain('AC-3 (moderate)');
+  });
+
+  it('passes HIPAA filters to the client and renders citation mappings', async () => {
+    const { client, list } = makeHipaaClient();
+
+    const code = await scenariosCommand(client, globals, [
+      '--framework=HIPAA',
+      '--citation',
+      '164.312(b)',
+      '--safeguard=Audit-Controls',
+      '--control-id',
+      '164.312(b)',
+    ]);
+
+    expect(code).toBe(0);
+    expect(list).toHaveBeenCalledWith({
+      framework: 'hipaa',
+      citation: '164.312(b)',
+      safeguard: 'audit-controls',
+      controlId: '164.312(b)',
+    });
+    expect(writeOut.mock.calls.flat().join('')).toContain('164.312(b) (audit-controls)');
+  });
+
+  it('fails fast when HIPAA filter flags are missing values', async () => {
+    const { client, list } = makeHipaaClient();
+
+    await expect(scenariosCommand(client, globals, ['--citation'])).rejects.toThrow(
+      '--citation requires a value',
+    );
+    await expect(scenariosCommand(client, globals, ['--safeguard'])).rejects.toThrow(
+      '--safeguard requires a value',
+    );
+    expect(list).not.toHaveBeenCalled();
   });
 
   it('fails fast on unknown scenarios options', async () => {
