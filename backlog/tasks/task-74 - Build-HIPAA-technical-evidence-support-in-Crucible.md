@@ -1,9 +1,11 @@
 ---
 id: TASK-74
 title: Build HIPAA technical evidence support in Crucible
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@codex'
 created_date: '2026-05-29 00:54'
+updated_date: '2026-05-29 02:33'
 labels:
   - feature
   - hipaa
@@ -28,9 +30,9 @@ HIPAA must be modeled as a technical evidence overlay. Crucible should not claim
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Backlog contains independently executable child tasks for schema, scenario annotation, discovery, reporting, export, docs, and Chimera gap validation.
-- [ ] #2 Implementation sequence preserves technical scenario categories and treats HIPAA as a compliance evidence overlay.
-- [ ] #3 doc-3 records the first usable milestone, non-goals, source anchors, and delivery phases.
+- [x] #1 Backlog contains independently executable child tasks for schema, scenario annotation, discovery, reporting, export, docs, and Chimera gap validation.
+- [x] #2 Implementation sequence preserves technical scenario categories and treats HIPAA as a compliance evidence overlay.
+- [x] #3 doc-3 records the first usable milestone, non-goals, source anchors, and delivery phases.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -44,3 +46,15 @@ Phase 4: add HIPAA technical evidence JSON export (`TASK-74.5`).
 Phase 5: publish GitHub Pages documentation (`TASK-74.6`).
 Phase 6: validate or fill Chimera endpoint/fixture gaps (`TASK-74.7`).
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+All seven child tasks are complete: schema, HIPAA scenario annotations, discovery filters, report rollups, technical evidence export, GitHub Pages documentation, and Chimera endpoint/fixture validation. doc-3 already records the first usable milestone, non-goals, source anchors, and phased delivery sequence.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the HIPAA technical evidence support program for Crucible. The implementation now supports HIPAA metadata, scenario discovery, report rollups, HIPAA evidence JSON export, user-facing Pages documentation, and a documented Chimera fixture/endpoint follow-up contract for deterministic runnable evidence.
+<!-- SECTION:FINAL_SUMMARY:END -->
