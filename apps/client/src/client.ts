@@ -135,6 +135,8 @@ class ScenariosNamespace {
       if (params.baseline) query.set('baseline', params.baseline);
       if (params.family) query.set('family', params.family);
       if (params.controlId) query.set('controlId', params.controlId);
+      if (params.citation) query.set('citation', params.citation);
+      if (params.safeguard) query.set('safeguard', params.safeguard);
     }
     const queryString = query.toString();
     const path = queryString

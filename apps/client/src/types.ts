@@ -94,7 +94,7 @@ export type RunnerFindingSeverity =
   | 'critical'
   | 'unknown';
 
-export type ComplianceFramework = 'fedramp';
+export type ComplianceFramework = 'fedramp' | 'hipaa';
 export type FedRampBaseline = 'low' | 'moderate' | 'high' | 'li-saas';
 export type FedRampControlFamily =
   | 'AC'
@@ -118,7 +118,7 @@ export type FedRampControlFamily =
   | 'SI'
   | 'SR';
 export type FedRampControlId = string;
-export type FedRampEvidenceType =
+export type ComplianceEvidenceType =
   | 'request-response'
   | 'audit-log'
   | 'auth-token'
@@ -129,10 +129,18 @@ export type FedRampEvidenceType =
   | 'runner-artifact'
   | 'tls-handshake'
   | 'openapi-operation';
+export type FedRampEvidenceType = ComplianceEvidenceType;
 export type ComplianceImplementationStatus = 'planned' | 'partial' | 'implemented' | 'manual' | 'deferred';
+export type HipaaSafeguard =
+  | 'access-control'
+  | 'audit-controls'
+  | 'integrity'
+  | 'person-or-entity-authentication'
+  | 'transmission-security';
+export type HipaaCitation = string;
 
 export interface ComplianceEvidenceMapping {
-  type: FedRampEvidenceType;
+  type: ComplianceEvidenceType;
   stepId?: string;
   description?: string;
 }
@@ -157,7 +165,25 @@ export interface FedRampComplianceMapping {
   evidence?: ComplianceEvidenceMapping[];
 }
 
-export type ComplianceMapping = FedRampComplianceMapping;
+export interface HipaaEndpointReference {
+  method: Request['method'];
+  path: string;
+}
+
+export interface HipaaComplianceMapping {
+  framework: 'hipaa';
+  citation: HipaaCitation;
+  controlId?: HipaaCitation;
+  safeguard: HipaaSafeguard;
+  evidenceTypes: ComplianceEvidenceType[];
+  assertion: string;
+  rationale: string;
+  implementationStatus: ComplianceImplementationStatus;
+  endpoint?: HipaaEndpointReference;
+  evidence?: ComplianceEvidenceMapping[];
+}
+
+export type ComplianceMapping = FedRampComplianceMapping | HipaaComplianceMapping;
 
 export interface ScenarioCompliance {
   mappings: ComplianceMapping[];
@@ -167,7 +193,9 @@ export interface ListScenariosParams {
   framework?: ComplianceFramework;
   baseline?: FedRampBaseline;
   family?: FedRampControlFamily;
-  controlId?: FedRampControlId;
+  controlId?: FedRampControlId | HipaaCitation;
+  citation?: HipaaCitation;
+  safeguard?: HipaaSafeguard;
 }
 
 export interface NucleiStepRunner {

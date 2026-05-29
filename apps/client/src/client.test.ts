@@ -82,6 +82,24 @@ describe('CrucibleClient', () => {
       expect(url.searchParams.has('family')).toBe(false);
     });
 
+    it('list() encodes HIPAA discovery query params', async () => {
+      fetch = mockFetch([]);
+      client = new CrucibleClient({ baseUrl: 'http://localhost:3000', fetch });
+
+      await client.scenarios.list({
+        framework: 'hipaa',
+        citation: '164.312(b)',
+        safeguard: 'audit-controls',
+      });
+
+      const calledUrl = fetch.mock.calls[0][0] as string;
+      const url = new URL(calledUrl);
+      expect(url.searchParams.get('framework')).toBe('hipaa');
+      expect(url.searchParams.get('citation')).toBe('164.312(b)');
+      expect(url.searchParams.get('safeguard')).toBe('audit-controls');
+      expect(url.searchParams.has('baseline')).toBe(false);
+    });
+
     it('list() supports relative API base URLs with FedRAMP discovery query params', async () => {
       fetch = mockFetch([]);
       client = new CrucibleClient({ baseUrl: '/proxy', fetch });

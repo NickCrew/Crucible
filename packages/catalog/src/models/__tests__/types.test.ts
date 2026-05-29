@@ -136,6 +136,36 @@ describe('ScenarioSchema', () => {
       expect(result.data.compliance?.mappings[0].controlId).toBe('SC-13');
     }
   });
+
+  it('accepts HIPAA compliance metadata without replacing category or rule_ids', () => {
+    const result = ScenarioSchema.safeParse(
+      minimalScenario({
+        category: 'Compliance',
+        rule_ids: ['164.312-b'],
+        compliance: {
+          mappings: [
+            {
+              framework: 'hipaa',
+              citation: '164.312(b)',
+              controlId: '164.312(b)',
+              safeguard: 'audit-controls',
+              evidenceTypes: ['audit-log', 'request-response'],
+              assertion: 'phi-export-remains-auditable',
+              rationale: 'Audit suppression attempts collect evidence for HIPAA audit control behavior.',
+              implementationStatus: 'implemented',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.category).toBe('Compliance');
+      expect(result.data.rule_ids).toEqual(['164.312-b']);
+      expect(result.data.compliance?.mappings[0].framework).toBe('hipaa');
+    }
+  });
 });
 
 describe('ComplianceMappingSchema', () => {
@@ -153,6 +183,114 @@ describe('ComplianceMappingSchema', () => {
 
   it('accepts valid FedRAMP metadata', () => {
     expect(ComplianceMappingSchema.safeParse(mapping).success).toBe(true);
+  });
+
+  it('accepts valid HIPAA metadata', () => {
+    expect(
+      ComplianceMappingSchema.safeParse({
+        framework: 'hipaa',
+        citation: '164.312(a)(2)(i)',
+        safeguard: 'access-control',
+        evidenceTypes: ['request-response'],
+        assertion: 'minimum-necessary-access-is-enforced',
+        rationale: 'Role-specific PHI access should filter fields outside the user need.',
+        implementationStatus: 'implemented',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('accepts HIPAA endpoint and per-step evidence mappings', () => {
+    const result = ScenarioComplianceSchema.safeParse({
+      mappings: [
+        {
+          framework: 'hipaa',
+          citation: '164.312(b)',
+          safeguard: 'audit-controls',
+          evidenceTypes: ['audit-log', 'request-response'],
+          assertion: 'phi-export-remains-auditable',
+          rationale: 'PHI export attempts should remain auditable.',
+          implementationStatus: 'implemented',
+          endpoint: {
+            method: 'POST',
+            path: '/api/v1/healthcare/records/export',
+          },
+          evidence: [
+            {
+              type: 'audit-log',
+              stepId: 'audit-suppression-header',
+              description: 'Audit suppression attempt should still produce an auditable decision.',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects unsupported HIPAA safeguards', () => {
+    expect(
+      ComplianceMappingSchema.safeParse({
+        framework: 'hipaa',
+        citation: '164.312(b)',
+        safeguard: 'physical-access',
+        evidenceTypes: ['audit-log'],
+        assertion: 'phi-export-remains-auditable',
+        rationale: 'PHI export attempts should remain auditable.',
+        implementationStatus: 'implemented',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects malformed HIPAA citations', () => {
+    const validMapping = {
+      framework: 'hipaa',
+      citation: '164.312(a)(1)',
+      controlId: '164.312(a)(1)',
+      safeguard: 'access-control',
+      evidenceTypes: ['request-response'],
+      assertion: 'minimum-necessary-access-is-enforced',
+      rationale: 'Role-specific PHI access should filter fields outside the user need.',
+      implementationStatus: 'implemented',
+    };
+
+    for (const citation of ['45 CFR 164.312(a)(1)', '164.312(f)', '164.312(a)()', '164.312']) {
+      expect(
+        ComplianceMappingSchema.safeParse({
+          ...validMapping,
+          citation,
+          controlId: citation,
+        }).success,
+      ).toBe(false);
+    }
+
+    expect(
+      ComplianceMappingSchema.safeParse({
+        framework: 'hipaa',
+        citation: '164.312(e)(2)(ii)',
+        controlId: '164.312(e)(2)(ii)',
+        safeguard: 'access-control',
+        evidenceTypes: ['request-response'],
+        assertion: 'minimum-necessary-access-is-enforced',
+        rationale: 'Role-specific PHI access should filter fields outside the user need.',
+        implementationStatus: 'implemented',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects HIPAA control IDs that drift from the citation', () => {
+    expect(
+      ComplianceMappingSchema.safeParse({
+        framework: 'hipaa',
+        citation: '164.312(a)(1)',
+        controlId: '164.312(b)',
+        safeguard: 'access-control',
+        evidenceTypes: ['request-response'],
+        assertion: 'minimum-necessary-access-is-enforced',
+        rationale: 'Role-specific PHI access should filter fields outside the user need.',
+        implementationStatus: 'implemented',
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects unsupported FedRAMP baselines', () => {
@@ -313,6 +451,23 @@ describe('Scenario compliance helpers', () => {
         ],
       },
     }),
+    minimalScenario({
+      id: 'hipaa-audit',
+      compliance: {
+        mappings: [
+          {
+            framework: 'hipaa',
+            citation: '164.312(b)',
+            controlId: '164.312(b)',
+            safeguard: 'audit-controls',
+            evidenceTypes: ['audit-log'],
+            assertion: 'phi-export-remains-auditable',
+            rationale: 'PHI export attempts should remain auditable.',
+            implementationStatus: 'implemented',
+          },
+        ],
+      },
+    }),
     minimalScenario({ id: 'no-compliance' }),
   ];
 
@@ -320,6 +475,17 @@ describe('Scenario compliance helpers', () => {
     expect(scenarioHasComplianceMapping(scenarios[0], {})).toBe(true);
     expect(scenarioHasComplianceMapping(scenarios[0], { framework: 'fedramp' })).toBe(true);
     expect(scenarioHasComplianceMapping(scenarios[0], { family: 'SC' })).toBe(false);
+    expect(scenarioHasComplianceMapping(scenarios[2], { framework: 'hipaa' })).toBe(true);
+    expect(scenarioHasComplianceMapping(scenarios[2], { citation: '164.312(b)' })).toBe(true);
+    expect(scenarioHasComplianceMapping(scenarios[2], { controlId: '164.312(b)' })).toBe(true);
+    expect(scenarioHasComplianceMapping(scenarios[2], { safeguard: 'audit-controls' })).toBe(true);
+    expect(scenarioHasComplianceMapping(scenarios[2], { baseline: 'moderate' })).toBe(false);
+    expect(scenarioHasComplianceMapping(scenarios[2], { family: 'AC' })).toBe(false);
+    expect(scenarioHasComplianceMapping(scenarios[2], { citation: '164.312(e)(1)' })).toBe(false);
+    expect(scenarioHasComplianceMapping(scenarios[2], { controlId: '164.312(e)(1)' })).toBe(false);
+    expect(scenarioHasComplianceMapping(scenarios[2], { safeguard: 'access-control' })).toBe(false);
+    expect(scenarioHasComplianceMapping(scenarios[0], { citation: '164.312(b)' })).toBe(false);
+    expect(scenarioHasComplianceMapping(scenarios[0], { safeguard: 'audit-controls' })).toBe(false);
   });
 
   it('does not match framework-specific filters against future generic mappings', () => {
@@ -332,6 +498,8 @@ describe('Scenario compliance helpers', () => {
     expect(scenarioHasComplianceMapping(futureScenario, {})).toBe(true);
     expect(scenarioHasComplianceMapping(futureScenario, { framework: 'fedramp' })).toBe(false);
     expect(scenarioHasComplianceMapping(futureScenario, { baseline: 'high' })).toBe(false);
+    expect(scenarioHasComplianceMapping(futureScenario, { citation: '164.312(b)' })).toBe(false);
+    expect(scenarioHasComplianceMapping(futureScenario, { safeguard: 'audit-controls' })).toBe(false);
   });
 
   it('matches later compliance mappings in the same scenario', () => {
@@ -380,6 +548,12 @@ describe('Scenario compliance helpers', () => {
     ]);
     expect(filterScenariosByCompliance(scenarios, { controlId: 'AC-3' }).map((s) => s.id)).toEqual([
       'fedramp-ac',
+    ]);
+    expect(filterScenariosByCompliance(scenarios, { framework: 'hipaa' }).map((s) => s.id)).toEqual([
+      'hipaa-audit',
+    ]);
+    expect(filterScenariosByCompliance(scenarios, { citation: '164.312(b)' }).map((s) => s.id)).toEqual([
+      'hipaa-audit',
     ]);
   });
 

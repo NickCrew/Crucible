@@ -141,11 +141,13 @@ export type ScenarioTargetCompatibility = z.infer<typeof ScenarioTargetCompatibi
 
 // ── Compliance Metadata ─────────────────────────────────────────────
 
-export const ComplianceFrameworkSchema = z.enum(['fedramp']);
+export const ComplianceFrameworkSchema = z.enum(['fedramp', 'hipaa']);
 
 export type ComplianceFramework = z.infer<typeof ComplianceFrameworkSchema>;
 
 export const FedRampComplianceFrameworkSchema = z.literal('fedramp');
+
+export const HipaaComplianceFrameworkSchema = z.literal('hipaa');
 
 export const FedRampRevisionSchema = z.enum(['rev5']);
 
@@ -180,7 +182,7 @@ export const FedRampControlFamilySchema = z.enum([
 
 export type FedRampControlFamily = z.infer<typeof FedRampControlFamilySchema>;
 
-export const FedRampEvidenceTypeSchema = z.enum([
+export const ComplianceEvidenceTypeSchema = z.enum([
   'request-response',
   'audit-log',
   'auth-token',
@@ -192,6 +194,10 @@ export const FedRampEvidenceTypeSchema = z.enum([
   'tls-handshake',
   'openapi-operation',
 ]);
+
+export type ComplianceEvidenceType = z.infer<typeof ComplianceEvidenceTypeSchema>;
+
+export const FedRampEvidenceTypeSchema = ComplianceEvidenceTypeSchema;
 
 export type FedRampEvidenceType = z.infer<typeof FedRampEvidenceTypeSchema>;
 
@@ -214,9 +220,28 @@ export const FedRampControlIdSchema = z
 
 export type FedRampControlId = z.infer<typeof FedRampControlIdSchema>;
 
+export const HipaaSafeguardSchema = z.enum([
+  'access-control',
+  'audit-controls',
+  'integrity',
+  'person-or-entity-authentication',
+  'transmission-security',
+]);
+
+export type HipaaSafeguard = z.infer<typeof HipaaSafeguardSchema>;
+
+export const HipaaCitationSchema = z
+  .string()
+  .regex(
+    /^164\.312\([a-e]\)(?:\([a-z0-9]+\))*$/,
+    'HIPAA citation must look like 164.312(a)(1), 164.312(b), or 164.312(e)(2)(ii)',
+  );
+
+export type HipaaCitation = z.infer<typeof HipaaCitationSchema>;
+
 export const ComplianceEvidenceMappingSchema = z
   .object({
-    type: FedRampEvidenceTypeSchema,
+    type: ComplianceEvidenceTypeSchema,
     stepId: z.string().min(1).optional(),
     description: z.string().min(1).optional(),
   })
@@ -233,6 +258,13 @@ export const FedRampEndpointReferenceSchema = z.object({
 });
 
 export type FedRampEndpointReference = z.infer<typeof FedRampEndpointReferenceSchema>;
+
+export const HipaaEndpointReferenceSchema = z.object({
+  method: HttpMethodSchema,
+  path: z.string().min(1),
+});
+
+export type HipaaEndpointReference = z.infer<typeof HipaaEndpointReferenceSchema>;
 
 const FedRampComplianceMappingBaseSchema = z
   .object({
@@ -270,11 +302,48 @@ export const FedRampComplianceMappingSchema = FedRampComplianceMappingBaseSchema
 
 export type FedRampComplianceMapping = z.infer<typeof FedRampComplianceMappingSchema>;
 
+const HipaaComplianceMappingBaseSchema = z
+  .object({
+    framework: HipaaComplianceFrameworkSchema,
+    citation: HipaaCitationSchema,
+    controlId: HipaaCitationSchema.optional(),
+    safeguard: HipaaSafeguardSchema,
+    evidenceTypes: z.array(ComplianceEvidenceTypeSchema).min(1),
+    assertion: z.string().min(1),
+    rationale: z.string().min(1),
+    implementationStatus: ComplianceImplementationStatusSchema,
+    endpoint: HipaaEndpointReferenceSchema.optional(),
+    evidence: z.array(ComplianceEvidenceMappingSchema).optional(),
+  })
+  .strict();
+
+function validateHipaaControlId(
+  mapping: z.infer<typeof HipaaComplianceMappingBaseSchema>,
+  ctx: z.RefinementCtx,
+) {
+  if (mapping.controlId && mapping.controlId !== mapping.citation) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['controlId'],
+      message: `HIPAA control ID "${mapping.controlId}" must match citation "${mapping.citation}"`,
+    });
+  }
+}
+
+export const HipaaComplianceMappingSchema = HipaaComplianceMappingBaseSchema.superRefine(
+  validateHipaaControlId,
+);
+
+export type HipaaComplianceMapping = z.infer<typeof HipaaComplianceMappingSchema>;
+
 export const ComplianceMappingSchema = z
-  .discriminatedUnion('framework', [FedRampComplianceMappingBaseSchema])
+  .discriminatedUnion('framework', [FedRampComplianceMappingBaseSchema, HipaaComplianceMappingBaseSchema])
   .superRefine((mapping, ctx) => {
     if (mapping.framework === 'fedramp') {
       validateFedRampControlFamily(mapping, ctx);
+    }
+    if (mapping.framework === 'hipaa') {
+      validateHipaaControlId(mapping, ctx);
     }
   });
 
@@ -447,7 +516,21 @@ export interface FedRampScenarioComplianceFilter {
   controlId?: FedRampControlId;
 }
 
-export type ScenarioComplianceFilter = FedRampScenarioComplianceFilter;
+export interface HipaaScenarioComplianceFilter {
+  framework?: 'hipaa';
+  controlId?: HipaaCitation;
+  citation?: HipaaCitation;
+  safeguard?: HipaaSafeguard;
+}
+
+export interface ScenarioComplianceFilter {
+  framework?: ComplianceFramework;
+  baseline?: FedRampBaseline;
+  family?: FedRampControlFamily;
+  controlId?: FedRampControlId | HipaaCitation;
+  citation?: HipaaCitation;
+  safeguard?: HipaaSafeguard;
+}
 
 export function scenarioHasComplianceMapping(
   scenario: Pick<Scenario, 'compliance'>,
@@ -461,6 +544,12 @@ export function scenarioHasComplianceMapping(
     }
 
     if (mapping.framework === 'fedramp') {
+      if ('citation' in filter && filter.citation) {
+        return false;
+      }
+      if ('safeguard' in filter && filter.safeguard) {
+        return false;
+      }
       if (filter.baseline && mapping.baseline !== filter.baseline) {
         return false;
       }
@@ -473,7 +562,24 @@ export function scenarioHasComplianceMapping(
       return true;
     }
 
-    if (filter.baseline || filter.family || filter.controlId) {
+    if (mapping.framework === 'hipaa') {
+      if (filter.baseline || filter.family) {
+        return false;
+      }
+      const controlId = mapping.controlId ?? mapping.citation;
+      if (filter.controlId && controlId !== filter.controlId) {
+        return false;
+      }
+      if ('citation' in filter && filter.citation && mapping.citation !== filter.citation) {
+        return false;
+      }
+      if ('safeguard' in filter && filter.safeguard && mapping.safeguard !== filter.safeguard) {
+        return false;
+      }
+      return true;
+    }
+
+    if (filter.baseline || filter.family || filter.controlId || ('citation' in filter && filter.citation) || ('safeguard' in filter && filter.safeguard)) {
       return false;
     }
 
