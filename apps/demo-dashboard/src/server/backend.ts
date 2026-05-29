@@ -509,6 +509,7 @@ export function attachCrucibleBackend(
       req.query.format === ReportService.JSON_SUFFIX
         || req.query.format === ReportService.HTML_SUFFIX
         || req.query.format === ReportService.OSCAL_SUFFIX
+        || req.query.format === ReportService.HIPAA_SUFFIX
         ? req.query.format
         : undefined;
 
@@ -535,6 +536,10 @@ export function attachCrucibleBackend(
 
   app.get(`${apiBasePath}/reports/:id/oscal`, (req, res) => {
     return sendReportFile(req.params.id, ReportService.OSCAL_SUFFIX, res, reportsDir, engine);
+  });
+
+  app.get(`${apiBasePath}/reports/:id/hipaa`, (req, res) => {
+    return sendReportFile(req.params.id, ReportService.HIPAA_SUFFIX, res, reportsDir, engine);
   });
 
   app.get(`${apiBasePath}/reports/:id/pdf`, (req, res) => {
@@ -691,7 +696,12 @@ function sendArtifactFile(
 
 function sendReportFile(
   id: string,
-  format: typeof ReportService.JSON_SUFFIX | typeof ReportService.HTML_SUFFIX | typeof ReportService.OSCAL_SUFFIX | 'pdf',
+  format:
+    | typeof ReportService.JSON_SUFFIX
+    | typeof ReportService.HTML_SUFFIX
+    | typeof ReportService.OSCAL_SUFFIX
+    | typeof ReportService.HIPAA_SUFFIX
+    | 'pdf',
   res: Response,
   reportsDir: string,
   engine: CrucibleRuntime['engine'],
@@ -711,7 +721,11 @@ function sendReportFile(
 
   if (format === ReportService.HTML_SUFFIX) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  } else if (format === ReportService.JSON_SUFFIX || format === ReportService.OSCAL_SUFFIX) {
+  } else if (
+    format === ReportService.JSON_SUFFIX
+    || format === ReportService.OSCAL_SUFFIX
+    || format === ReportService.HIPAA_SUFFIX
+  ) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
   } else {
     res.setHeader('Content-Type', 'application/pdf');

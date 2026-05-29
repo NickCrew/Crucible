@@ -515,7 +515,7 @@ export interface AssessmentStartOptions {
 // ── Report options ──────────────────────────────────────────────────
 
 export interface GetReportOptions {
-  format?: 'json' | 'html' | 'oscal.json';
+  format?: 'json' | 'html' | 'oscal.json' | 'hipaa-evidence.json';
 }
 
 // ── Socket options ──────────────────────────────────────────────────

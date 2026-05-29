@@ -141,6 +141,18 @@ describe('CrucibleClient', () => {
         expect.any(Object),
       );
     });
+
+    it('hipaa() downloads the HIPAA technical evidence export', async () => {
+      fetch = mockFetch({});
+      client = new CrucibleClient({ baseUrl: 'http://localhost:3000', fetch });
+
+      await client.reports.hipaa('exec/1?#2');
+
+      expect(fetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/reports/exec%2F1%3F%232/hipaa',
+        expect.any(Object),
+      );
+    });
   });
 
   describe('executions', () => {

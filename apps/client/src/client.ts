@@ -296,4 +296,9 @@ class ReportsNamespace {
   async oscal(id: string): Promise<Response> {
     return this.client.fetchRaw(`${this.client.api}/reports/${encodeURIComponent(id)}/oscal`);
   }
+
+  /** Download the HIPAA technical evidence export file. */
+  async hipaa(id: string): Promise<Response> {
+    return this.client.fetchRaw(`${this.client.api}/reports/${encodeURIComponent(id)}/hipaa`);
+  }
 }

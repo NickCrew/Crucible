@@ -131,6 +131,7 @@ export interface AssessmentReportPayload {
     json: string;
     html: string;
     oscal: string;
+    hipaa: string;
   };
   steps: Array<{
     id: string;
@@ -169,6 +170,7 @@ export class ReportService {
   static readonly HTML_SUFFIX = 'html';
   static readonly JSON_SUFFIX = 'json';
   static readonly OSCAL_SUFFIX = 'oscal.json';
+  static readonly HIPAA_SUFFIX = 'hipaa-evidence.json';
 
   constructor(config: ReportServiceConfig) {
     this.reportsDir = config.reportsDir;
@@ -183,7 +185,7 @@ export class ReportService {
   async generateReports(
     execution: ScenarioExecution,
     scenario: Scenario,
-  ): Promise<{ jsonPath: string; htmlPath: string; oscalPath: string }> {
+  ): Promise<{ jsonPath: string; htmlPath: string; oscalPath: string; hipaaPath: string }> {
     while (this.locks.has(execution.id)) {
       await this.locks.get(execution.id);
     }
@@ -193,7 +195,8 @@ export class ReportService {
       const jsonPath = await this.generateJsonReport(execution.id, payload);
       const htmlPath = await this.generateHtmlReport(execution.id, payload);
       const oscalPath = await this.generateOscalReport(execution.id, buildOscalShapedExport(payload));
-      return { jsonPath, htmlPath, oscalPath };
+      const hipaaPath = await this.generateHipaaEvidenceReport(execution.id, buildHipaaTechnicalEvidenceExport(payload));
+      return { jsonPath, htmlPath, oscalPath, hipaaPath };
     })();
 
     this.locks.set(execution.id, reportPromise.then(() => {}).catch(() => {}));
@@ -212,6 +215,7 @@ export class ReportService {
     const jsonExport = `${this.baseUrl}/api/reports/${execution.id}?format=${ReportService.JSON_SUFFIX}`;
     const htmlExport = `${this.baseUrl}/api/reports/${execution.id}?format=${ReportService.HTML_SUFFIX}`;
     const oscalExport = `${this.baseUrl}/api/reports/${execution.id}?format=${ReportService.OSCAL_SUFFIX}`;
+    const hipaaExport = `${this.baseUrl}/api/reports/${execution.id}?format=${ReportService.HIPAA_SUFFIX}`;
     const stepResults = new Map(execution.steps.map((step) => [step.stepId, step]));
 
     const frameworks: Record<string, FrameworkCompliance> = {};
@@ -264,6 +268,7 @@ export class ReportService {
         json: jsonExport,
         html: htmlExport,
         oscal: oscalExport,
+        hipaa: hipaaExport,
       },
       steps: scenario.steps.map((definition) => {
         const result = stepResults.get(definition.id);
@@ -324,6 +329,16 @@ export class ReportService {
     writeFileSync(filePath, JSON.stringify(payload, null, 2));
     return filePath;
   }
+
+  private async generateHipaaEvidenceReport(
+    executionId: string,
+    payload: HipaaTechnicalEvidenceExport,
+  ): Promise<string> {
+    const fileName = `${executionId}.${ReportService.HIPAA_SUFFIX}`;
+    const filePath = join(this.reportsDir, fileName);
+    writeFileSync(filePath, JSON.stringify(payload, null, 2));
+    return filePath;
+  }
 }
 
 interface OscalShapedEvidenceExport {
@@ -365,6 +380,36 @@ interface OscalShapedEvidenceExport {
       relatedObservations: Array<{ observationUuid: string }>;
       props: Array<{ name: string; value: string }>;
     }>;
+  }>;
+  limitations: string[];
+}
+
+interface HipaaTechnicalEvidenceExport {
+  profile: 'crucible-hipaa-technical-evidence';
+  generatedAt: string;
+  assessment: {
+    id: string;
+    scenarioId: string;
+    targetUrl?: string;
+    status: ScenarioExecution['status'];
+    passed: boolean;
+    score: number;
+  };
+  scenario: {
+    id: string;
+    name: string;
+    description?: string;
+  };
+  citations: Array<{
+    citation: string;
+    safeguard?: string;
+    assertion: string;
+    rationale: string;
+    status: ComplianceControlStatus;
+    implementationStatus: string;
+    evidenceTypes: string[];
+    endpoint?: ComplianceControlRollup['endpoint'];
+    evidence: ComplianceEvidenceReference[];
   }>;
   limitations: string[];
 }
@@ -657,6 +702,45 @@ function buildOscalShapedExport(payload: AssessmentReportPayload): OscalShapedEv
       'Includes dynamic request, response, assertion, endpoint, and runner evidence collected by Crucible only.',
       'Does not include FedRAMP policy documents, SSP content, POA&M workflow, inventory, or 3PAO attestation artifacts.',
       'Uses OSCAL-shaped JSON for compatibility and future mapping; formal OSCAL conformance is intentionally not claimed.',
+    ],
+  };
+}
+
+function buildHipaaTechnicalEvidenceExport(payload: AssessmentReportPayload): HipaaTechnicalEvidenceExport {
+  const controls = (payload.compliance?.frameworks.hipaa?.controls ?? [])
+    .filter((control) => control.framework === 'hipaa');
+
+  return {
+    profile: 'crucible-hipaa-technical-evidence',
+    generatedAt: payload.generatedAt,
+    assessment: {
+      id: payload.execution.id,
+      scenarioId: payload.execution.scenarioId,
+      targetUrl: payload.execution.targetUrl,
+      status: payload.execution.status,
+      passed: payload.execution.passed,
+      score: payload.execution.score,
+    },
+    scenario: {
+      id: payload.scenario.id,
+      name: payload.scenario.name,
+      description: payload.scenario.description,
+    },
+    citations: controls.map((control) => ({
+      citation: control.citation ?? control.controlId,
+      safeguard: control.safeguard,
+      assertion: control.assertion,
+      rationale: control.rationale,
+      status: control.status,
+      implementationStatus: control.implementationStatus,
+      evidenceTypes: control.evidenceTypes,
+      endpoint: control.endpoint,
+      evidence: control.evidence,
+    })),
+    limitations: [
+      'This export contains Crucible technical evidence for HIPAA Security Rule technical safeguard mappings only.',
+      'This is not legal advice, a HIPAA compliance certification, an audit-ready attestation, or a complete covered-entity/business-associate assessment.',
+      'Administrative, physical, policy, workforce, contractual, and risk-management requirements are outside this export.',
     ],
   };
 }

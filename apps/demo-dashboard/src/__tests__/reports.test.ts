@@ -266,8 +266,8 @@ describe('ReportService', () => {
     });
   });
 
-  it('adds HIPAA citation rollups to JSON and HTML reports without OSCAL wording', async () => {
-    const { jsonPath, htmlPath, oscalPath } = await service.generateReports(
+  it('adds HIPAA citation rollups and technical evidence exports without OSCAL wording', async () => {
+    const { jsonPath, htmlPath, oscalPath, hipaaPath } = await service.generateReports(
       {
         ...mockExecution,
         report: { ...mockExecution.report, passed: false, score: 25 },
@@ -357,6 +357,7 @@ describe('ReportService', () => {
     );
 
     const json = JSON.parse(readFileSync(jsonPath, 'utf8'));
+    expect(json.exports.hipaa).toContain(`format=${ReportService.HIPAA_SUFFIX}`);
     expect(json.compliance.frameworks.hipaa.counts).toEqual({
       passed: 1,
       failed: 1,
@@ -403,6 +404,39 @@ describe('ReportService', () => {
 
     const oscal = JSON.parse(readFileSync(oscalPath, 'utf8'));
     expect(oscal.results[0].reviewedControls.controlSelections[0].includeControls).toEqual([]);
+
+    const hipaa = JSON.parse(readFileSync(hipaaPath, 'utf8'));
+    expect(hipaa).toMatchObject({
+      profile: 'crucible-hipaa-technical-evidence',
+      assessment: {
+        id: mockExecution.id,
+        scenarioId: mockExecution.scenarioId,
+        targetUrl: mockExecution.targetUrl,
+        passed: false,
+        score: 25,
+      },
+      scenario: {
+        id: 'compliance-hipaa-audit-suppression',
+        name: 'HIPAA Audit Suppression Probe',
+      },
+    });
+    expect(hipaa.citations[0]).toMatchObject({
+      citation: '164.312(b)',
+      safeguard: 'audit-controls',
+      assertion: 'phi-export-remains-auditable',
+      status: 'passed',
+      endpoint: { method: 'POST', path: '/api/v1/healthcare/records/export' },
+      evidence: [
+        {
+          type: 'audit-log',
+          stepId: 'passed-evidence',
+          status: 'completed',
+        },
+      ],
+    });
+    expect(hipaa.limitations.join(' ')).toContain('not legal advice');
+    expect(hipaa.limitations.join(' ')).toContain('not');
+    expect(hipaa.limitations.join(' ')).toContain('complete covered-entity/business-associate assessment');
   });
 
   it('renders failed assertion details, nullish values, and second-based durations in HTML', async () => {
