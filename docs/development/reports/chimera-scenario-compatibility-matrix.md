@@ -2,6 +2,8 @@
 
 Generated on 2026-03-11 for backlog task TASK-28. This matrix audits the live Crucible scenario catalog against Chimera's current API surface.
 
+HIPAA rows were manually refreshed on 2026-05-29 for TASK-74.7 against the current Crucible HIPAA scenarios and Chimera `apps/vuln-api` OpenAPI/routes. The summary counts below still describe the original generated matrix; use the HIPAA validation section for the first HIPAA evidence slice.
+
 ## Sources
 
 - `packages/catalog/scenarios/` — 129 scenario JSON files in Crucible.
@@ -40,6 +42,19 @@ Suggested additional status labels for future generated matrices:
 | `missing-fedramp-annotation` | Route matches, but the OpenAPI operation does not expose the required FedRAMP extensions. |
 | `stale-control-map` | Route matches, but the scenario references a control ID, assertion, or evidence type that is absent from the operation annotation. |
 | `route-and-control-drift` | The scenario has both route mismatch and FedRAMP metadata mismatch. |
+
+## HIPAA Endpoint and Fixture Validation
+
+Validated on 2026-05-29 for TASK-74.7. Route compatibility is good enough for the first HIPAA technical evidence slice, but deterministic evidence quality still depends on Chimera-owned fixture and response behavior updates.
+
+| Scenario | Route coverage | Current Chimera behavior | Required contract for deterministic evidence | Owner / files |
+| --- | ---: | --- | --- | --- |
+| `compliance-hipaa-audit-suppression.json` | 2/2 | `POST /api/v1/healthcare/records/export` returns `200` and sets `audit_logged: false` when `X-Skip-Audit: true`; `POST /api/v1/admin/audit/suspend` returns `200` unless the request body enables strict mode. | Decide whether Crucible expects WAF-blocked evidence or Chimera strict-mode evidence. For Chimera-only deterministic runs, make audit suppression return an auditable denial for the HIPAA fixture path or update the scenario to send the existing strict-mode signal. | Chimera: `apps/vuln-api/app/blueprints/healthcare/routes.py`, `apps/vuln-api/app/blueprints/admin/routes.py`, `apps/vuln-api/docs/openapi.yaml`; validate with `cd apps/vuln-api && uv run pytest tests/unit/test_healthcare_routes.py tests/unit/test_admin_routes.py -q`. |
+| `compliance-hipaa-emergency-access.json` | 1/1 | `POST /api/v1/healthcare/records/emergency-access` returns `400` without `justification` and `200` with `justification`. | Usable as the first break-glass route. Add an audit event id or audit-log side effect if the evidence export must prove the `audit-log` evidence type instead of relying on request/response only. | Chimera: `apps/vuln-api/app/blueprints/healthcare/routes.py`, `apps/vuln-api/docs/openapi.yaml`; validate with `cd apps/vuln-api && uv run pytest tests/unit/test_healthcare_routes.py -q`. |
+| `compliance-hipaa-minimum-necessary.json` | 1/1 | `GET /api/v1/healthcare/records/{record_id}` exists, but `P-88210` is not seeded and the route ignores `clinical_token` / `billing_token`; the response shape does not include `psychotherapy_notes` or `invoice_id`. | Seed a deterministic `P-88210` or rewrite the scenario to a stable Chimera record id, then make the route return full clinical data for `clinical_token` and a billing-filtered payload containing `invoice_id` and excluding `psychotherapy_notes` for `billing_token`. | Chimera: `apps/vuln-api/app/utils/demo_data.py`, `apps/vuln-api/app/blueprints/healthcare/routes.py`, `apps/vuln-api/docs/openapi.yaml`; validate with `cd apps/vuln-api && uv run pytest tests/unit/test_healthcare_routes.py -q`. |
+| `compliance-hipaa-patient-export.json` | 1/1 | `POST /api/v1/healthcare/records/export` accepts `patient_ids` and returns export metadata, but it does not return patient record contents, redaction decisions, or explicit note-exclusion evidence. | Usable as a route-level export probe. For stronger redaction evidence, return a deterministic export payload that includes allowed patient data and explicit exclusion/redaction metadata for psychotherapy and internal administrative notes. | Chimera: `apps/vuln-api/app/blueprints/healthcare/routes.py`, `apps/vuln-api/docs/openapi.yaml`; validate with `cd apps/vuln-api && uv run pytest tests/unit/test_healthcare_routes.py -q`. |
+
+Crucible-side scenario metadata can remain unchanged for route discovery. Before implementing Chimera changes, confirm whether the first runnable HIPAA slice should exercise direct Chimera strict-mode behavior or a WAF/proxy block in front of Chimera; that choice determines whether the audit-suppression scenario should change its request body or rely on an external block signal.
 
 ## Summary
 
@@ -128,8 +143,9 @@ Suggested additional status labels for future generated matrices:
 | FedRAMP Non-FIPS Cipher Negotiation Probe | compliance-fedramp-cipher-negotiation.json | generic | (default target) | needs-update | 1/1 | rewrite /api/v1/health -> /api/v1/auth/status |
 | FedRAMP Cross-Tenant Data Leakage Probe | compliance-fedramp-cross-tenant.json | generic | (default target) | compatible | 2/2 | all scenario URLs match current Chimera OpenAPI routes |
 | GDPR Consent Preference Conflict Probe | compliance-gdpr-consent-conflict.json | generic | (default target) | no-match | 0/2 | no direct Chimera route for /api/v1/user/consent, /api/v1/marketing/send-promotion |
-| HIPAA Audit Log Suppression Attempt | compliance-hipaa-audit-suppression.json | generic | (default target) | needs-update | 1/2 | review remaining /api/v1/admin/audit/suspend |
+| HIPAA Audit Log Suppression Attempt | compliance-hipaa-audit-suppression.json | generic | (default target) | compatible | 2/2 | routes now match current Chimera OpenAPI; behavior still needs strict/WAF blocking decision for deterministic audit-suppression evidence |
 | HIPAA Emergency Access (Break Glass) Abuse | compliance-hipaa-emergency-access.json | generic | (default target) | compatible | 1/1 | all scenario URLs match current Chimera OpenAPI routes |
+| HIPAA Minimum Necessary Access Control Check | compliance-hipaa-minimum-necessary.json | generic | (default target) | compatible | 1/1 | route matches current Chimera OpenAPI; deterministic fixture and role-filtered response behavior are still needed |
 | HIPAA Patient Right to Access Disclosure Check | compliance-hipaa-patient-export.json | generic | (default target) | compatible | 1/1 | all scenario URLs match current Chimera OpenAPI routes |
 | PCI DSS Payment Page Integrity Probe | compliance-pci-page-integrity.json | generic | (default target) | no-match | 0/2 | no direct Chimera route for /api/v1/checkout/session, /api/v1/checkout/ui-state |
 | PCI DSS Insecure PAN Logging Probe | compliance-pci-pan-logging.json | generic | (default target) | compatible | 2/2 | all scenario URLs match current Chimera OpenAPI routes |

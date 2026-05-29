@@ -1,9 +1,11 @@
 ---
 id: TASK-74.7
 title: '[Chimera] Validate HIPAA endpoint and fixture coverage'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@codex'
 created_date: '2026-05-29 00:56'
+updated_date: '2026-05-29 02:32'
 labels:
   - feature
   - hipaa
@@ -31,9 +33,9 @@ Audit the existing HIPAA scenario routes against Chimera-compatible healthcare e
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Compatibility matrix is refreshed or reviewed for the first HIPAA evidence slice.
-- [ ] #2 Required Chimera fixtures/endpoints for HIPAA scenarios are identified with exact route/data expectations.
-- [ ] #3 If Chimera changes are required, the task documents owner repo, files/routes, and validation commands before implementation begins.
+- [x] #1 Compatibility matrix is refreshed or reviewed for the first HIPAA evidence slice.
+- [x] #2 Required Chimera fixtures/endpoints for HIPAA scenarios are identified with exact route/data expectations.
+- [x] #3 If Chimera changes are required, the task documents owner repo, files/routes, and validation commands before implementation begins.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -44,3 +46,15 @@ Audit the existing HIPAA scenario routes against Chimera-compatible healthcare e
 3. File or update follow-on Chimera implementation notes in this task before changing the sibling repo.
 4. Keep Crucible scenario metadata aligned with whatever Chimera contract is chosen.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Validated HIPAA scenario routes against Chimera OpenAPI and Starlette route behavior. Current route coverage is 4/4 for HIPAA scenario route families, including the newly documented minimum-necessary scenario, but deterministic evidence requires Chimera-owned fixture/response follow-up for minimum-necessary role filtering, audit-suppression denial semantics, and stronger export redaction evidence. Validation probe: cd /Users/nick/Developer/Chimera/apps/vuln-api && uv run python with Starlette TestClient against create_app() for /api/v1/healthcare/records/export, /api/v1/healthcare/records/emergency-access, /api/v1/healthcare/records/P-88210, /api/v1/healthcare/records/REC-FEDRAMP-A-001, and /api/v1/admin/audit/suspend.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Refreshed the Chimera compatibility matrix with a HIPAA endpoint and fixture validation section. The matrix now identifies exact Chimera owner files, route/data expectations, and validation commands before any sibling-repo implementation begins. No Chimera files were changed in this slice.
+<!-- SECTION:FINAL_SUMMARY:END -->
