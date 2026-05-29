@@ -6,6 +6,35 @@
   "description": "Verifies enforcement of the 'Minimum Necessary' rule by ensuring that users with different roles (e.g., Billing vs Clinical) receive appropriately filtered data when accessing the same patient resource.",
   "rule_ids": ["164.312-a-1"],
   "tags": ["hipaa", "rbac", "healthcare", "privacy"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "hipaa",
+        "citation": "164.312(a)(1)",
+        "safeguard": "access-control",
+        "evidenceTypes": ["request-response"],
+        "assertion": "minimum-necessary-access-is-enforced",
+        "rationale": "Role-specific patient record requests collect evidence that PHI exposure is constrained to the access needed for the user's role.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "GET",
+          "path": "/api/v1/healthcare/records/{patient_id}"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "clinical-access-full",
+            "description": "Clinical access establishes the authorized full-record baseline."
+          },
+          {
+            "type": "request-response",
+            "stepId": "billing-access-filtered",
+            "description": "Billing access should filter psychotherapy notes while retaining billing context."
+          }
+        ]
+      }
+    ]
+  },
   "steps": [
     {
       "id": "clinical-access-full",

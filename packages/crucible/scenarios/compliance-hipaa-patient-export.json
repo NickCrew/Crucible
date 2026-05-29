@@ -5,6 +5,31 @@
   "difficulty": "Advanced",
   "description": "Checks if internal medical notes or psychotherapy notes are leaked during a standard patient data export.",
   "rule_ids": ["164.312-a-1"],
+  "tags": ["hipaa", "access-control", "healthcare", "patient-export"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "hipaa",
+        "citation": "164.312(a)(1)",
+        "safeguard": "access-control",
+        "evidenceTypes": ["request-response"],
+        "assertion": "patient-export-excludes-restricted-notes",
+        "rationale": "Patient export requests collect evidence that sensitive internal notes are not exposed beyond the intended access boundary.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "POST",
+          "path": "/api/v1/healthcare/records/export"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "patient-export-request",
+            "description": "Patient export response should exclude psychotherapy and internal administrative notes."
+          }
+        ]
+      }
+    ]
+  },
   "steps": [
     {
       "id": "patient-export-request",

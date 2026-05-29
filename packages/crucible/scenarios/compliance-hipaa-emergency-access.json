@@ -5,6 +5,36 @@
   "difficulty": "Advanced",
   "description": "Tests the enforcement of justification and alerting for emergency access to PHI.",
   "rule_ids": ["164.312-a-1"],
+  "tags": ["hipaa", "access-control", "healthcare", "emergency-access"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "hipaa",
+        "citation": "164.312(a)(1)",
+        "safeguard": "access-control",
+        "evidenceTypes": ["request-response", "audit-log"],
+        "assertion": "emergency-access-requires-justification",
+        "rationale": "Emergency access probes collect evidence that PHI access is constrained by authorization and justification requirements.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "POST",
+          "path": "/api/v1/healthcare/records/emergency-access"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "emergency-access-no-justification",
+            "description": "Emergency PHI access without justification should be blocked."
+          },
+          {
+            "type": "audit-log",
+            "stepId": "emergency-access-with-justification",
+            "description": "Justified emergency access should remain attributable and reviewable."
+          }
+        ]
+      }
+    ]
+  },
   "steps": [
     {
       "id": "emergency-access-no-justification",

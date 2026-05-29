@@ -5,6 +5,36 @@
   "difficulty": "Advanced",
   "description": "Attempts to perform a PHI export while suppressing audit logging, violating HIPAA's accounting of disclosures requirement.",
   "rule_ids": ["164.312-b"],
+  "tags": ["hipaa", "audit", "healthcare", "ephi"],
+  "compliance": {
+    "mappings": [
+      {
+        "framework": "hipaa",
+        "citation": "164.312(b)",
+        "safeguard": "audit-controls",
+        "evidenceTypes": ["request-response", "audit-log"],
+        "assertion": "phi-export-remains-auditable",
+        "rationale": "PHI export and audit suppression attempts collect dynamic evidence that audit controls cannot be bypassed by request headers or privileged maintenance calls.",
+        "implementationStatus": "implemented",
+        "endpoint": {
+          "method": "POST",
+          "path": "/api/v1/healthcare/records/export"
+        },
+        "evidence": [
+          {
+            "type": "request-response",
+            "stepId": "audit-suppression-header",
+            "description": "Provider attempts to export PHI while requesting audit suppression."
+          },
+          {
+            "type": "audit-log",
+            "stepId": "suspend-audit-api",
+            "description": "Global audit suspension attempt should be denied or captured as auditable evidence."
+          }
+        ]
+      }
+    ]
+  },
   "steps": [
     {
       "id": "phi-export-standard",
