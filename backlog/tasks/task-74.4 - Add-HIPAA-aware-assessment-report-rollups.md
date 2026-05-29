@@ -1,9 +1,11 @@
 ---
 id: TASK-74.4
 title: Add HIPAA-aware assessment report rollups
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@codex'
 created_date: '2026-05-29 00:55'
+updated_date: '2026-05-29 02:14'
 labels:
   - feature
   - hipaa
@@ -28,9 +30,9 @@ Extend assessment report generation so HIPAA mappings produce framework rollups 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Assessment JSON includes compliance.frameworks.hipaa counts and per-citation controls when HIPAA mappings are present.
-- [ ] #2 HTML reports render HIPAA citation/status/evidence summaries without OSCAL or FedRAMP wording.
-- [ ] #3 FedRAMP report tests continue to pass and shared rollup code is covered by tests.
+- [x] #1 Assessment JSON includes compliance.frameworks.hipaa counts and per-citation controls when HIPAA mappings are present.
+- [x] #2 HTML reports render HIPAA citation/status/evidence summaries without OSCAL or FedRAMP wording.
+- [x] #3 FedRAMP report tests continue to pass and shared rollup code is covered by tests.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -41,3 +43,15 @@ Extend assessment report generation so HIPAA mappings produce framework rollups 
 3. Render HIPAA summaries in HTML reports alongside existing framework cards.
 4. Add report tests for passed, failed, skipped, and unknown HIPAA evidence states.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Generalized report compliance rollups so HIPAA mappings produce JSON/HTML framework cards with citation, safeguard, assertion, endpoint, implementation status, evidence references, status counts, and safeguard grouping. Kept OSCAL-shaped export limited to FedRAMP controls.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Assessment reports now include compliance.frameworks.hipaa controls/counts/families for HIPAA-mapped scenarios, render HIPAA citation summaries in HTML, preserve FedRAMP/OSCAL behavior, and cover passed, failed, skipped, unknown, and sparse HIPAA metadata cases.
+<!-- SECTION:FINAL_SUMMARY:END -->

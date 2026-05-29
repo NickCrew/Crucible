@@ -4,6 +4,7 @@ import { join } from 'path';
 import {
   type Request as ScenarioRequest,
   type FedRampComplianceMapping,
+  type HipaaComplianceMapping,
   type Scenario,
   type ScenarioRunnerStep,
   getScenarioStepType,
@@ -77,17 +78,19 @@ export interface ComplianceEvidenceReference {
 }
 
 export interface ComplianceControlRollup {
-  framework: 'fedramp';
-  revision: string;
-  baseline: string;
-  family: string;
+  framework: 'fedramp' | 'hipaa';
+  revision?: string;
+  baseline?: string;
+  family?: string;
   controlId: string;
+  citation?: string;
+  safeguard?: string;
   assertion: string;
   rationale: string;
   status: ComplianceControlStatus;
   implementationStatus: string;
   evidenceTypes: string[];
-  endpoint?: FedRampComplianceMapping['endpoint'];
+  endpoint?: FedRampComplianceMapping['endpoint'] | HipaaComplianceMapping['endpoint'];
   evidence: ComplianceEvidenceReference[];
 }
 
@@ -371,24 +374,37 @@ function addComplianceMappingsToFrameworks(
   scenario: Scenario,
   stepResults: Map<string, ExecutionStepResult>,
 ): void {
+  const stepResultValues = [...stepResults.values()];
   const fedrampMappings = (scenario.compliance?.mappings ?? []).filter(
     (mapping): mapping is FedRampComplianceMapping => mapping.framework === 'fedramp',
   );
-  if (fedrampMappings.length === 0) {
+  const hipaaMappings = (scenario.compliance?.mappings ?? []).filter(
+    (mapping): mapping is HipaaComplianceMapping => mapping.framework === 'hipaa',
+  );
+
+  addFrameworkRollup(frameworks, 'fedramp', fedrampMappings.map((mapping) => buildControlRollup(mapping, stepResults, stepResultValues)));
+  addFrameworkRollup(frameworks, 'hipaa', hipaaMappings.map((mapping) => buildControlRollup(mapping, stepResults, stepResultValues)));
+}
+
+function addFrameworkRollup(
+  frameworks: Record<string, FrameworkCompliance>,
+  framework: 'fedramp' | 'hipaa',
+  controls: ComplianceControlRollup[],
+): void {
+  if (controls.length === 0) {
     return;
   }
 
-  const controls = fedrampMappings.map((mapping) => buildControlRollup(mapping, stepResults));
   const counts = countControlStatuses(controls);
   const families = groupControlRollupsByFamily(controls);
-  const passed = controls.length > 0 && controls.every((control) => control.status === 'passed');
+  const passed = controls.every((control) => control.status === 'passed');
 
-  frameworks.fedramp = {
-    ...(frameworks.fedramp ?? { name: 'fedramp', rules: [] }),
-    name: 'fedramp',
+  frameworks[framework] = {
+    ...(frameworks[framework] ?? { name: framework, rules: [] }),
+    name: framework,
     passed,
-    score: controls.length > 0 ? Math.round((counts.passed / controls.length) * 100) : 0,
-    rules: frameworks.fedramp?.rules ?? [],
+    score: Math.round((counts.passed / controls.length) * 100),
+    rules: frameworks[framework]?.rules ?? [],
     counts,
     families,
     controls,
@@ -396,10 +412,27 @@ function addComplianceMappingsToFrameworks(
 }
 
 function buildControlRollup(
-  mapping: FedRampComplianceMapping,
+  mapping: FedRampComplianceMapping | HipaaComplianceMapping,
   stepResults: Map<string, ExecutionStepResult>,
+  stepResultValues: ExecutionStepResult[],
 ): ComplianceControlRollup {
-  const evidence = buildEvidenceReferences(mapping, stepResults);
+  const evidence = buildEvidenceReferences(mapping, stepResults, stepResultValues);
+  if (mapping.framework === 'hipaa') {
+    const controlId = mapping.controlId ?? mapping.citation ?? 'unknown-control';
+    return {
+      framework: 'hipaa',
+      controlId,
+      citation: mapping.citation,
+      safeguard: mapping.safeguard,
+      assertion: mapping.assertion,
+      rationale: mapping.rationale,
+      status: determineControlStatus(evidence),
+      implementationStatus: mapping.implementationStatus,
+      evidenceTypes: mapping.evidenceTypes,
+      endpoint: mapping.endpoint,
+      evidence,
+    };
+  }
 
   return {
     framework: 'fedramp',
@@ -418,17 +451,19 @@ function buildControlRollup(
 }
 
 function buildEvidenceReferences(
-  mapping: FedRampComplianceMapping,
+  mapping: FedRampComplianceMapping | HipaaComplianceMapping,
   stepResults: Map<string, ExecutionStepResult>,
+  stepResultValues: ExecutionStepResult[],
 ): ComplianceEvidenceReference[] {
   const explicitEvidence = mapping.evidence ?? [];
+  const mappingId = mapping.framework === 'fedramp' ? mapping.controlId : (mapping.controlId ?? mapping.citation ?? 'unknown-control');
   if (explicitEvidence.length === 0) {
-    const implicitStatus = summarizeImplicitEvidenceStatus([...stepResults.values()]);
-    const implicitAssertions = [...stepResults.values()].flatMap((result) => result.assertions ?? []);
+    const implicitStatus = summarizeImplicitEvidenceStatus(stepResultValues);
+    const implicitAssertions = stepResultValues.flatMap((result) => result.assertions ?? []);
 
     return mapping.evidenceTypes.map((type) => ({
       type,
-      description: `${mapping.controlId} evidence: ${type}`,
+      description: `${mappingId} evidence: ${type}`,
       status: implicitStatus,
       assertions: implicitAssertions.map((assertion) => ({
         field: assertion.field,
@@ -521,7 +556,13 @@ function countControlStatuses(controls: ComplianceControlRollup[]): ComplianceSt
 function groupControlRollupsByFamily(controls: ComplianceControlRollup[]): ComplianceFamilyRollup[] {
   const byFamily = new Map<string, ComplianceControlRollup[]>();
   for (const control of controls) {
-    byFamily.set(control.family, [...(byFamily.get(control.family) ?? []), control]);
+    const family = control.family ?? control.safeguard ?? control.framework;
+    const familyControls = byFamily.get(family);
+    if (familyControls) {
+      familyControls.push(control);
+    } else {
+      byFamily.set(family, [control]);
+    }
   }
 
   return [...byFamily.entries()]
@@ -536,7 +577,12 @@ function groupControlRollupsByFamily(controls: ComplianceControlRollup[]): Compl
 function buildOscalShapedExport(payload: AssessmentReportPayload): OscalShapedEvidenceExport {
   const controls = Object.values(payload.compliance?.frameworks ?? {})
     .flatMap((framework) => framework.controls ?? [])
-    .filter((control) => control.framework === 'fedramp');
+    .filter((control): control is ComplianceControlRollup & {
+      framework: 'fedramp';
+      baseline: string;
+      family: string;
+      revision: string;
+    } => control.framework === 'fedramp');
   const observationIds = new Map<ComplianceControlRollup, string>();
   for (const control of controls) {
     observationIds.set(control, stableEvidenceId('obs', payload.execution.id, control.controlId, control.assertion));

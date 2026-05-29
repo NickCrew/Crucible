@@ -266,6 +266,145 @@ describe('ReportService', () => {
     });
   });
 
+  it('adds HIPAA citation rollups to JSON and HTML reports without OSCAL wording', async () => {
+    const { jsonPath, htmlPath, oscalPath } = await service.generateReports(
+      {
+        ...mockExecution,
+        report: { ...mockExecution.report, passed: false, score: 25 },
+        steps: [
+          {
+            ...mockExecution.steps[0],
+            stepId: 'passed-evidence',
+            status: 'completed',
+            assertions: [{ field: 'blocked', expected: true, actual: true, passed: true }],
+          },
+          {
+            ...mockExecution.steps[0],
+            stepId: 'failed-evidence',
+            status: 'failed',
+            assertions: [{ field: 'blocked', expected: true, actual: false, passed: false }],
+          },
+          {
+            ...mockExecution.steps[0],
+            stepId: 'skipped-evidence',
+            status: 'skipped',
+            assertions: [],
+          },
+        ],
+      },
+      {
+        ...mockScenario,
+        id: 'compliance-hipaa-audit-suppression',
+        name: 'HIPAA Audit Suppression Probe',
+        compliance: {
+          mappings: [
+            {
+              framework: 'hipaa',
+              citation: '164.312(b)',
+              controlId: '164.312(b)',
+              safeguard: 'audit-controls',
+              evidenceTypes: ['audit-log'],
+              assertion: 'phi-export-remains-auditable',
+              rationale: 'PHI export attempts should remain auditable.',
+              implementationStatus: 'implemented',
+              endpoint: { method: 'POST', path: '/api/v1/healthcare/records/export' },
+              evidence: [{ type: 'audit-log', stepId: 'passed-evidence' }],
+            },
+            {
+              framework: 'hipaa',
+              citation: '164.312(a)(1)',
+              controlId: '164.312(a)(1)',
+              safeguard: 'access-control',
+              evidenceTypes: ['request-response'],
+              assertion: 'emergency-access-requires-justification',
+              rationale: 'Emergency access should require a reason.',
+              implementationStatus: 'implemented',
+              evidence: [{ type: 'request-response', stepId: 'failed-evidence' }],
+            },
+            {
+              framework: 'hipaa',
+              citation: '164.312(c)(1)',
+              controlId: '164.312(c)(1)',
+              safeguard: 'integrity',
+              evidenceTypes: ['request-response'],
+              assertion: 'record-integrity-is-preserved',
+              rationale: 'Skipped evidence should mark the citation skipped.',
+              implementationStatus: 'partial',
+              evidence: [{ type: 'request-response', stepId: 'skipped-evidence' }],
+            },
+            {
+              framework: 'hipaa',
+              citation: '164.312(d)',
+              controlId: '164.312(d)',
+              safeguard: 'person-or-entity-authentication',
+              evidenceTypes: ['auth-token'],
+              assertion: 'identity-is-verified',
+              rationale: 'Missing evidence should remain unknown.',
+              implementationStatus: 'manual',
+              evidence: [{ type: 'auth-token', stepId: 'missing-evidence' }],
+            },
+            {
+              framework: 'hipaa',
+              evidenceTypes: ['config-state'],
+              assertion: 'sparse-mapping-is-renderable',
+              rationale: 'Sparse metadata should not break report generation.',
+              implementationStatus: 'manual',
+              evidence: [{ type: 'config-state', stepId: 'missing-sparse-evidence' }],
+            },
+          ],
+        },
+      },
+    );
+
+    const json = JSON.parse(readFileSync(jsonPath, 'utf8'));
+    expect(json.compliance.frameworks.hipaa.counts).toEqual({
+      passed: 1,
+      failed: 1,
+      skipped: 1,
+      unknown: 2,
+    });
+    expect(json.compliance.frameworks.hipaa.families.map((family: { family: string }) => family.family)).toEqual([
+      'access-control',
+      'audit-controls',
+      'hipaa',
+      'integrity',
+      'person-or-entity-authentication',
+    ]);
+    expect(json.compliance.frameworks.hipaa.controls[0]).toMatchObject({
+      framework: 'hipaa',
+      controlId: '164.312(b)',
+      citation: '164.312(b)',
+      safeguard: 'audit-controls',
+      status: 'passed',
+      assertion: 'phi-export-remains-auditable',
+      endpoint: { method: 'POST', path: '/api/v1/healthcare/records/export' },
+    });
+    expect(json.compliance.frameworks.hipaa.controls[4]).toMatchObject({
+      framework: 'hipaa',
+      controlId: 'unknown-control',
+      status: 'unknown',
+      assertion: 'sparse-mapping-is-renderable',
+      evidence: [
+        {
+          type: 'config-state',
+          status: 'not-run',
+        },
+      ],
+    });
+
+    const html = readFileSync(htmlPath, 'utf8');
+    expect(html).toContain('hipaa');
+    expect(html).toContain('164.312(b)');
+    expect(html).toContain('audit-controls');
+    expect(html).toContain('phi-export-remains-auditable');
+    expect(html).toContain('/api/v1/healthcare/records/export');
+    expect(html).not.toContain('FedRAMP');
+    expect(html).not.toContain('OSCAL');
+
+    const oscal = JSON.parse(readFileSync(oscalPath, 'utf8'));
+    expect(oscal.results[0].reviewedControls.controlSelections[0].includeControls).toEqual([]);
+  });
+
   it('renders failed assertion details, nullish values, and second-based durations in HTML', async () => {
     const { htmlPath } = await service.generateReports(
       {
