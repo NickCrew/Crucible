@@ -7,6 +7,7 @@
 | [Getting Started](user-guides/getting-started.md) | Install, configure, and launch Crucible |
 | [Running Scenarios](user-guides/running-scenarios.md) | Browse the catalog, run simulations, and review assessments |
 | [FedRAMP Functionality](user-guides/fedramp.md) | FedRAMP scenario discovery, assessment rollups, and OSCAL-shaped evidence exports |
+| [HIPAA Functionality](user-guides/hipaa.md) | HIPAA scenario discovery, assessment rollups, and technical evidence exports |
 | [Editing Scenarios](user-guides/editing-scenarios.md) | Create and modify scenario definitions |
 | [API Client Library](user-guides/api-client.md) | Typed TypeScript client for the Crucible REST and WebSocket APIs |
 | [CLI Reference](user-guides/cli.md) | Lightweight remote CLI for scripts and CI pipelines |

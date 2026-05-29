@@ -5,6 +5,8 @@ guides:
     url: /user-guides/running-scenarios
   - title: FedRAMP Functionality
     url: /user-guides/fedramp
+  - title: HIPAA Functionality
+    url: /user-guides/hipaa
   - title: Editing Scenarios
     url: /user-guides/editing-scenarios
   - title: API Client Library

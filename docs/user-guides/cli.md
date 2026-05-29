@@ -62,6 +62,7 @@ List all scenarios on the server.
 ```bash
 crucible-cli scenarios
 crucible-cli scenarios --framework fedramp --baseline moderate --family AC --control-id AC-3 --show-controls
+crucible-cli scenarios --framework hipaa --citation 164.312(b) --safeguard audit-controls --show-controls
 ```
 
 ```
@@ -81,6 +82,16 @@ FedRAMP discovery flags:
 | `--family <family>` | Filter by control family, such as `AC` or `SC` |
 | `--control-id <id>` | Filter by a control ID, such as `AC-3` |
 | `--show-controls` | Show mapped FedRAMP controls in table output |
+
+HIPAA discovery flags:
+
+| Flag | Description |
+|------|-------------|
+| `--framework hipaa` | Limit results to scenarios with HIPAA mappings |
+| `--citation <citation>` | Filter by a HIPAA technical safeguard citation, such as `164.312(b)` |
+| `--safeguard <name>` | Filter by safeguard, such as `audit-controls` |
+| `--control-id <id>` | Also accepts HIPAA citations |
+| `--show-controls` | Show mapped HIPAA citations in table output |
 
 ### `assess`
 
@@ -245,10 +256,14 @@ crucible-cli reports abc123 --download pdf -o report.pdf
 
 # Download the OSCAL-shaped FedRAMP evidence export
 crucible-cli reports abc123 --download oscal -o fedramp-evidence.oscal.json
+
+# Download the HIPAA technical evidence export
+crucible-cli reports abc123 --download hipaa -o hipaa-evidence.json
 ```
 
 If `-o` is omitted, the file is saved as `<id>-report.<ext>` in the current directory.
-OSCAL downloads use `<id>-report.oscal.json`.
+OSCAL downloads use `<id>-report.oscal.json`; HIPAA downloads use
+`<id>-report.hipaa-evidence.json`.
 
 ## CI integration
 

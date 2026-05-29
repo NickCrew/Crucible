@@ -137,6 +137,7 @@ const jsonRes = await client.reports.json(id);
 const htmlRes = await client.reports.html(id);
 const pdfRes = await client.reports.pdf(id);
 const oscalRes = await client.reports.oscal(id);
+const hipaaRes = await client.reports.hipaa(id);
 
 // Save a PDF to disk
 import { writeFile } from 'node:fs/promises';
@@ -148,6 +149,10 @@ await writeFile('report.pdf', buffer);
 It is intended for dynamic assessment evidence interchange and includes control
 mappings, rollups, assertion outcomes, and evidence references. It does not
 claim to be a complete FedRAMP authorization artifact.
+
+`client.reports.hipaa(id)` returns a HIPAA technical evidence JSON export with
+assessment metadata, citations, safeguards, assertion outcomes, and explicit
+limitations. See [HIPAA Functionality](hipaa.md) for scope and non-goals.
 
 ## Error handling
 

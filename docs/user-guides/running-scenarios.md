@@ -27,6 +27,13 @@ FedRAMP control IDs, families, and baselines, and mapped cards show control
 badges. See [FedRAMP Functionality](fedramp.md) for CLI, API, report, and
 OSCAL-shaped export details.
 
+### HIPAA Filters
+
+HIPAA-mapped scenarios can be filtered by framework, citation, and technical
+safeguard. Search also matches HIPAA citations and safeguard names, and mapped
+cards show HIPAA citation badges. See [HIPAA Functionality](hipaa.md) for CLI,
+API, report rollup, and technical evidence export details.
+
 ### Viewing Details
 
 Click any card to open the scenario detail dialog with three tabs:

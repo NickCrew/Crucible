@@ -79,10 +79,12 @@ npm install -g @atlascrew/crucible-cli
 crucible-cli health
 crucible-cli scenarios
 crucible-cli scenarios --framework fedramp --baseline moderate --show-controls
+crucible-cli scenarios --framework hipaa --citation 164.312(b) --show-controls
 crucible-cli assess my-scenario --fail-below 90
 crucible-cli executions --status running,completed
 crucible-cli reports abc123 --download pdf -o report.pdf
 crucible-cli reports abc123 --download oscal -o fedramp-evidence.oscal.json
+crucible-cli reports abc123 --download hipaa -o hipaa-evidence.json
 ```
 
 Talks to a running Crucible server over HTTP. Set `CRUCIBLE_URL` or use `--server <url>`.
