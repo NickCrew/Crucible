@@ -1,16 +1,3 @@
----
-id: doc-2
-title: FedRAMP Support Plan for Crucible and Chimera
-type: specification
-created_date: '2026-05-27 15:35'
-updated_date: '2026-05-27 15:46'
-tags:
-  - fedramp
-  - compliance
-  - chimera
-  - planning
-  - sequence
----
 # FedRAMP Support Plan for Crucible and Chimera
 
 ## Intent

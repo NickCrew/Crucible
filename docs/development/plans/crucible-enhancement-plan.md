@@ -1,9 +1,3 @@
----
-id: doc-1
-title: 'Crucible Enhancement Plan: Advanced Engine & UI Patterns'
-type: other
-created_date: '2026-03-11 21:48'
----
 # Crucible Enhancement Plan: Advanced Engine & UI Patterns
 
 This document outlines the strategy for porting high-value architectural patterns and capabilities from the `demo-dashboard` and `control-panel-api` projects into the Crucible "Security Lab Suite".

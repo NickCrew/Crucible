@@ -1,14 +1,3 @@
----
-id: doc-3
-title: HIPAA Support Plan for Crucible
-type: specification
-created_date: '2026-05-29 00:54'
-updated_date: '2026-05-29 00:54'
-tags:
-  - hipaa
-  - compliance
-  - security-rule
----
 # HIPAA Support Plan for Crucible
 
 ## Decision
